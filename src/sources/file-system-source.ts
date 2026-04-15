@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import type { QuillBundle, QuillManifest, QuillMetadata, QuillSource } from '../types.js';
 import { RegistryError } from '../errors.js';
 import { toEngineFileTree } from '../format.js';
@@ -47,6 +48,17 @@ async function listFilesRecursive(
 	}
 
 	return paths;
+}
+
+/** First 6 lowercase hex chars of MD5 (for cache-busted filenames). */
+function md5Prefix6(data: Uint8Array | string): string {
+	const hash = createHash('md5');
+	if (typeof data === 'string') {
+		hash.update(data, 'utf8');
+	} else {
+		hash.update(data);
+	}
+	return hash.digest('hex').slice(0, 6);
 }
 
 /**
@@ -100,8 +112,8 @@ function isSemver(value: string): boolean {
  * derived from the directory structure; Quill.yaml content is validated by the
  * @quillmark/wasm engine at registration time.
  *
- * Also exposes `packageForHttp(outputDir)` to create zip bundles and write a manifest
- * for static hosting.
+ * Also exposes `packageForHttp(outputDir)` to create hashed zip bundles and a hashed
+ * manifest JSON file for static hosting (CDN-friendly cache keys).
  */
 export class FileSystemSource implements QuillSource {
 	private quillsDir: string;
@@ -200,10 +212,11 @@ export class FileSystemSource implements QuillSource {
 
 	/**
 	 * Packages all quills for HTTP static hosting.
-	 * Creates a zip archive of each quill version and writes
-	 * `.zip` bundles plus a `manifest.json` to `outputDir`.
+	 * Clears `outputDir`, then writes content-addressed `.zip` bundles and
+	 * `manifest.{md5prefix6}.json` (hash of the manifest JSON body).
 	 */
-	async packageForHttp(outputDir: string): Promise<void> {
+	async packageForHttp(outputDir: string): Promise<{ manifestFileName: string }> {
+		await fs.rm(outputDir, { recursive: true, force: true });
 		await fs.mkdir(outputDir, { recursive: true });
 
 		const manifest = await this.getManifest();
@@ -219,17 +232,27 @@ export class FileSystemSource implements QuillSource {
 			seenRefs.add(ref);
 		}
 
+		const packagedQuills: QuillMetadata[] = [];
 		for (const entry of manifest.quills) {
 			const quillDir = path.join(this.quillsDir, entry.name, entry.version);
 			const fileList = await listFilesRecursive(quillDir);
 
 			const packed = await packDirectory(quillDir, fileList);
-
-			const bundleFileName = `${entry.name}@${entry.version}.zip`;
+			const contentHash = md5Prefix6(packed);
+			const bundleFileName = `${entry.name}@${entry.version}.${contentHash}.zip`;
 			await fs.writeFile(path.join(outputDir, bundleFileName), packed);
+			packagedQuills.push({
+				...entry,
+				bundleFileName,
+			});
 		}
 
-		await fs.writeFile(path.join(outputDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+		const packagedManifest: QuillManifest = { quills: packagedQuills };
+		const manifestJson = JSON.stringify(packagedManifest, null, 2);
+		const manifestFileName = `manifest.${md5Prefix6(manifestJson)}.json`;
+		await fs.writeFile(path.join(outputDir, manifestFileName), manifestJson);
+
+		return { manifestFileName };
 	}
 
 }

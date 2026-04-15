@@ -10,6 +10,11 @@ export interface QuillMetadata {
 	name: string;
 	version: string;
 	description?: string;
+	/**
+	 * Packaged bundle filename under the HTTP base URL (e.g. `name@1.0.0.a1b2c3.zip`).
+	 * Set by `FileSystemSource.packageForHttp()`; required for `HttpSource.loadQuill()`.
+	 */
+	bundleFileName?: string;
 }
 
 /** Manifest listing all available quills from a source. */

@@ -6,6 +6,11 @@ import { unpackFiles } from '../bundle.js';
 export interface HttpSourceOptions {
 	/** Base URL serving zips + manifest (e.g., "https://cdn.example.com/quills/"). */
 	baseUrl: string;
+	/**
+	 * Manifest filename under `baseUrl` (e.g. `manifest.a1b2c3.json` from `packageForHttp()`).
+	 * Required unless `manifest` is preloaded.
+	 */
+	manifestFileName?: string;
 	/** Optional pre-loaded manifest to skip the initial fetch (for SSR bootstrap). */
 	manifest?: QuillManifest;
 	/** Optional custom fetch function (for testing or non-browser environments). */
@@ -16,10 +21,11 @@ export interface HttpSourceOptions {
  * QuillSource that fetches quill zip bundles and manifest from any HTTP endpoint.
  *
  * Supports local static serving, CDN hosting, and remote quill registries
- * with the same interface. Appends `?v={version}` to bundle URLs for cache-busting.
+ * with the same interface. Bundle URLs use hashed filenames from the manifest (from `packageForHttp()`).
  */
 export class HttpSource implements QuillSource {
 	private baseUrl: string;
+	private manifestFileName?: string;
 	private preloadedManifest?: QuillManifest;
 	private cachedManifest?: QuillManifest;
 	private fetchFn: typeof globalThis.fetch;
@@ -27,8 +33,14 @@ export class HttpSource implements QuillSource {
 	constructor(options: HttpSourceOptions) {
 		// Ensure baseUrl ends with a slash for consistent URL construction
 		this.baseUrl = options.baseUrl.endsWith('/') ? options.baseUrl : options.baseUrl + '/';
+		this.manifestFileName = options.manifestFileName;
 		this.preloadedManifest = options.manifest;
 		this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
+		if (!this.preloadedManifest && !this.manifestFileName) {
+			throw new Error(
+				'HttpSource requires `manifestFileName` (from packageForHttp) unless `manifest` is preloaded.',
+			);
+		}
 	}
 
 	async getManifest(): Promise<QuillManifest> {
@@ -40,7 +52,7 @@ export class HttpSource implements QuillSource {
 			return this.cachedManifest;
 		}
 
-		const url = `${this.baseUrl}manifest.json`;
+		const url = `${this.baseUrl}${this.manifestFileName}`;
 		let response: Response;
 		try {
 			response = await this.fetchFn(url);
@@ -90,8 +102,14 @@ export class HttpSource implements QuillSource {
 		}
 
 		const resolvedVersion = entry.version;
-		const bundleFileName = `${name}@${resolvedVersion}.zip`;
-		const bundleUrl = `${this.baseUrl}${bundleFileName}?v=${resolvedVersion}`;
+		if (!entry.bundleFileName) {
+			throw new RegistryError(
+				'load_error',
+				`Manifest entry for "${name}@${resolvedVersion}" is missing bundleFileName; re-pack with packageForHttp().`,
+				{ quillName: name, version: resolvedVersion },
+			);
+		}
+		const bundleUrl = `${this.baseUrl}${entry.bundleFileName}`;
 
 		let response: Response;
 		try {
