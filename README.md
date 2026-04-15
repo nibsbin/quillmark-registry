@@ -16,10 +16,12 @@ npm install @quillmark/registry
 
 ```ts
 import { Quillmark, init } from '@quillmark/wasm';
-import { QuillRegistry, HttpSource } from '@quillmark/registry';
+import { QuillRegistry, HttpSource, resolveManifestFileName } from '@quillmark/registry';
 
-// `manifestFileName` comes from your deploy (e.g. written by packageForHttp, or injected at build time).
-const manifestFileName = 'manifest.a1b2c3.json';
+// Resolve hashed manifest from a stable pointer file (defaults to manifest.json).
+const manifestFileName = await resolveManifestFileName({
+  baseUrl: 'https://cdn.example.com/quills/',
+});
 const source = new HttpSource({
   baseUrl: 'https://cdn.example.com/quills/',
   manifestFileName,
@@ -87,6 +89,24 @@ const source = new HttpSource({
 ```
 
 The manifest and each quill bundle use **content-hashed filenames** (6 hex chars, MD5 prefix) so you can serve them with long-lived CDN caches. Bundle URLs are `{baseUrl}{bundleFileName}` as given in the manifest (no query-string cache buster).
+
+### `resolveManifestFileName`
+
+Resolves the current hashed manifest filename using a stable bootstrap pointer file.
+
+```ts
+import { resolveManifestFileName } from '@quillmark/registry';
+
+const manifestFileName = await resolveManifestFileName({
+  baseUrl: 'https://cdn.example.com/quills/',
+  // optional: bootstrapFileName defaults to "manifest.json"
+  // bootstrapFileName: 'latest-manifest.json',
+});
+```
+
+Supported pointer payloads:
+- plain text: `manifest.a1b2c3.json`
+- JSON object: `{ "manifestFileName": "manifest.a1b2c3.json" }`
 
 ### `FileSystemSource`
 

@@ -21,6 +21,8 @@ export { toEngineFileTree } from './format.js';
 export { FileSystemSource } from './sources/file-system-source.js';
 export { HttpSource } from './sources/http-source.js';
 export type { HttpSourceOptions } from './sources/http-source.js';
+export { resolveManifestFileName } from './bootstrap.js';
+export type { ResolveManifestFileNameOptions } from './bootstrap.js';
 
 // Registry
 export { QuillRegistry } from './registry.js';
