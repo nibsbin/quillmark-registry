@@ -18,7 +18,12 @@ npm install @quillmark/registry
 import { Quillmark, init } from '@quillmark/wasm';
 import { QuillRegistry, HttpSource } from '@quillmark/registry';
 
-const source = new HttpSource({ baseUrl: 'https://cdn.example.com/quills/' });
+// `manifestFileName` comes from your deploy (e.g. written by packageForHttp, or injected at build time).
+const manifestFileName = 'manifest.a1b2c3.json';
+const source = new HttpSource({
+  baseUrl: 'https://cdn.example.com/quills/',
+  manifestFileName,
+});
 const registry = new QuillRegistry({ source });
 
 // Start fetching while @quillmark/wasm initializes
@@ -75,12 +80,13 @@ Fetches quill zips and manifest from any HTTP endpoint. Works in browser and Nod
 ```ts
 const source = new HttpSource({
   baseUrl: 'https://cdn.example.com/quills/',
+  manifestFileName: 'manifest.a1b2c3.json', // required unless `manifest` is preloaded
   manifest: preloadedManifest, // optional — skip initial manifest fetch (useful for SSR)
   fetch: customFetch,          // optional — custom fetch function
 });
 ```
 
-Zip URLs use the format `{baseUrl}{name}@{version}.zip?v={version}` for cache-busting.
+The manifest and each quill bundle use **content-hashed filenames** (6 hex chars, MD5 prefix) so you can serve them with long-lived CDN caches. Bundle URLs are `{baseUrl}{bundleFileName}` as given in the manifest (no query-string cache buster).
 
 ### `FileSystemSource`
 
@@ -93,8 +99,9 @@ const source = new FileSystemSource('/path/to/quills');
 #### Packaging for static hosting
 
 ```ts
-await source.packageForHttp('/path/to/output');
-// Writes: output/manifest.json, output/usaf_memo@1.0.0.zip, ...
+const { manifestFileName } = await source.packageForHttp('/path/to/output');
+// Clears the output directory, then writes manifest.{hash6}.json and name@version.{hash6}.zip per quill.
+// Pass `manifestFileName` into HttpSource (or publish it alongside your static assets).
 ```
 
 ### `QuillSource` interface

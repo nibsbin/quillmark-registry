@@ -242,26 +242,33 @@ describe('FileSystemSource', () => {
 	});
 
 	describe('packageForHttp()', () => {
-		it('should write .zip bundles and manifest.json to output directory', async () => {
+		const hashedBundleRe = /^[^@]+@[\d.]+\.[0-9a-f]{6}\.zip$/;
+		const hashedManifestRe = /^manifest\.[0-9a-f]{6}\.json$/;
+
+		it('should write hashed .zip bundles and manifest.{hash}.json to output directory', async () => {
 			await createQuillDir('usaf_memo', '1.0.0', 'USAF Memo');
 			await createQuillDir('classic_resume', '2.1.0');
 
 			const source = new FileSystemSource(TEST_DIR);
-			await source.packageForHttp(OUTPUT_DIR);
+			const { manifestFileName } = await source.packageForHttp(OUTPUT_DIR);
 
-			// Verify manifest.json was written
-			const manifestPath = path.join(OUTPUT_DIR, 'manifest.json');
+			expect(manifestFileName).toMatch(hashedManifestRe);
+
+			const manifestPath = path.join(OUTPUT_DIR, manifestFileName);
 			const manifestContent = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
 			expect(manifestContent.quills).toHaveLength(2);
+			for (const q of manifestContent.quills) {
+				expect(q.bundleFileName).toMatch(hashedBundleRe);
+			}
 
-			// Verify .zip files were written
 			const files = await fs.readdir(OUTPUT_DIR);
-			expect(files).toContain('usaf_memo@1.0.0.zip');
-			expect(files).toContain('classic_resume@2.1.0.zip');
-			expect(files).toContain('manifest.json');
+			const bundles = files.filter((f) => f.endsWith('.zip'));
+			expect(bundles).toHaveLength(2);
+			expect(bundles.every((f) => hashedBundleRe.test(f))).toBe(true);
+			expect(files).toContain(manifestFileName);
 
-			// Verify bundle contents
-			const zipData = await fs.readFile(path.join(OUTPUT_DIR, 'usaf_memo@1.0.0.zip'));
+			const usaf = manifestContent.quills.find((q: { name: string }) => q.name === 'usaf_memo')!;
+			const zipData = await fs.readFile(path.join(OUTPUT_DIR, usaf.bundleFileName));
 			const unpacked = await unpackFiles(new Uint8Array(zipData));
 			expect(unpacked['Quill.yaml']).toBeDefined();
 			expect(unpacked['template.typ']).toBeDefined();
@@ -273,16 +280,14 @@ describe('FileSystemSource', () => {
 			await createQuillDir('usaf_memo', '1.0.0');
 
 			const source = new FileSystemSource(TEST_DIR);
-			await source.packageForHttp(OUTPUT_DIR);
-
-			const files = await fs.readdir(OUTPUT_DIR);
-			expect(files).toContain('usaf_memo@0.1.0.zip');
-			expect(files).toContain('usaf_memo@1.0.0.zip');
+			const { manifestFileName } = await source.packageForHttp(OUTPUT_DIR);
 
 			const manifestContent = JSON.parse(
-				await fs.readFile(path.join(OUTPUT_DIR, 'manifest.json'), 'utf-8'),
+				await fs.readFile(path.join(OUTPUT_DIR, manifestFileName), 'utf-8'),
 			);
 			expect(manifestContent.quills).toHaveLength(2);
+			const bundles = (await fs.readdir(OUTPUT_DIR)).filter((f) => f.endsWith('.zip'));
+			expect(bundles).toHaveLength(2);
 		});
 
 		it('should create output directory if it does not exist', async () => {
@@ -290,10 +295,25 @@ describe('FileSystemSource', () => {
 
 			const source = new FileSystemSource(TEST_DIR);
 			const nestedOutput = path.join(OUTPUT_DIR, 'nested', 'dir');
-			await source.packageForHttp(nestedOutput);
+			const { manifestFileName } = await source.packageForHttp(nestedOutput);
 
 			const files = await fs.readdir(nestedOutput);
-			expect(files).toContain('manifest.json');
+			expect(files).toContain(manifestFileName);
+		});
+
+		it('should remove stale artifacts when re-packing the same output directory', async () => {
+			await createQuillDir('usaf_memo', '1.0.0');
+
+			const source = new FileSystemSource(TEST_DIR);
+			await fs.mkdir(OUTPUT_DIR, { recursive: true });
+			await fs.writeFile(path.join(OUTPUT_DIR, 'stale.zip'), 'old');
+			await fs.writeFile(path.join(OUTPUT_DIR, 'manifest.deadbeef.json'), '{}');
+
+			await source.packageForHttp(OUTPUT_DIR);
+
+			const files = await fs.readdir(OUTPUT_DIR);
+			expect(files).not.toContain('stale.zip');
+			expect(files).not.toContain('manifest.deadbeef.json');
 		});
 
 		it('should produce deterministic (byte-identical) .zip files across runs', async () => {
@@ -310,8 +330,13 @@ describe('FileSystemSource', () => {
 			await new Promise((r) => setTimeout(r, 50));
 			await source.packageForHttp(outputDir2);
 
-			const zip1 = await fs.readFile(path.join(outputDir1, 'usaf_memo@1.0.0.zip'));
-			const zip2 = await fs.readFile(path.join(outputDir2, 'usaf_memo@1.0.0.zip'));
+			const name1 = (await fs.readdir(outputDir1)).find((f) => f.startsWith('usaf_memo@1.0.0.'));
+			const name2 = (await fs.readdir(outputDir2)).find((f) => f.startsWith('usaf_memo@1.0.0.'));
+			expect(name1).toBeDefined();
+			expect(name1).toBe(name2);
+
+			const zip1 = await fs.readFile(path.join(outputDir1, name1!));
+			const zip2 = await fs.readFile(path.join(outputDir2, name2!));
 
 			expect(zip1.equals(zip2)).toBe(true);
 		});
@@ -326,6 +351,7 @@ describe('FileSystemSource', () => {
 			});
 
 			await expect(source.packageForHttp(OUTPUT_DIR)).rejects.toThrow(RegistryError);
+			vi.restoreAllMocks();
 		});
 	});
 });

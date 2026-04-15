@@ -91,16 +91,16 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 
 			// Package the fixtures for HTTP
 			const fsSource = new FileSystemSource(QUILLS_DIR);
-			await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
+			const { manifestFileName } = await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
 
 			const manifestJson = await fs.readFile(
-				path.join(HTTP_OUTPUT_DIR, 'manifest.json'),
+				path.join(HTTP_OUTPUT_DIR, manifestFileName),
 				'utf-8',
 			);
 
 			const mockFetch = vi.fn(async (url: string | URL | Request) => {
 				const urlStr = typeof url === 'string' ? url : url.toString();
-				if (urlStr.includes('manifest.json')) {
+				if (urlStr.includes(manifestFileName)) {
 					return new Response(manifestJson);
 				}
 				const bundleMatch = urlStr.match(/\/([^/?]+\.zip)/);
@@ -118,6 +118,7 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 
 			const httpSource = new HttpSource({
 				baseUrl: 'https://cdn.example.com/quills/',
+				manifestFileName,
 				fetch: mockFetch,
 			});
 			const registry = new QuillRegistry({ source: httpSource, engine });
@@ -139,17 +140,17 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 			const engine = wasm as unknown as QuillmarkEngine;
 
 			const fsSource = new FileSystemSource(QUILLS_DIR);
-			await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
+			const { manifestFileName } = await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
 
 			const manifestJson = await fs.readFile(
-				path.join(HTTP_OUTPUT_DIR, 'manifest.json'),
+				path.join(HTTP_OUTPUT_DIR, manifestFileName),
 				'utf-8',
 			);
 			const manifest = JSON.parse(manifestJson) as QuillManifest;
 
 			const mockFetch = vi.fn(async (url: string | URL | Request) => {
 				const urlStr = typeof url === 'string' ? url : url.toString();
-				if (urlStr.includes('manifest.json')) {
+				if (urlStr.includes(manifestFileName)) {
 					return new Response(manifestJson);
 				}
 				const bundleMatch = urlStr.match(/\/([^/?]+\.zip)/);
@@ -167,6 +168,7 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 
 			const httpSource = new HttpSource({
 				baseUrl: 'https://cdn.example.com/quills/',
+				manifestFileName,
 				fetch: mockFetch,
 			});
 			const registry = new QuillRegistry({ source: httpSource, engine });
@@ -187,16 +189,16 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 	describe('FileSystemSource → packageForHttp → HttpSource roundtrip', () => {
 		it('should produce identical registrations through the full roundtrip', async () => {
 			const fsSource = new FileSystemSource(QUILLS_DIR);
-			await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
+			const { manifestFileName } = await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
 
 			const manifestJson = await fs.readFile(
-				path.join(HTTP_OUTPUT_DIR, 'manifest.json'),
+				path.join(HTTP_OUTPUT_DIR, manifestFileName),
 				'utf-8',
 			);
 
 			const mockFetch = vi.fn(async (url: string | URL | Request) => {
 				const urlStr = typeof url === 'string' ? url : url.toString();
-				if (urlStr.includes('manifest.json')) {
+				if (urlStr.includes(manifestFileName)) {
 					return new Response(manifestJson);
 				}
 				const bundleMatch = urlStr.match(/\/([^/?]+\.zip)/);
@@ -214,6 +216,7 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 
 			const httpSource = new HttpSource({
 				baseUrl: 'https://cdn.example.com/quills/',
+				manifestFileName,
 				fetch: mockFetch,
 			});
 
