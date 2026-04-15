@@ -1,5 +1,7 @@
 # @quillmark/registry
 
+**Under Development**
+
 Unified API for discovering, loading, and registering Quills with the Quillmark WASM engine. Works in both browser and Node.js environments.
 
 ## Install
