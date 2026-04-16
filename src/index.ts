@@ -17,6 +17,10 @@ export type { RegistryErrorCode } from './errors.js';
 // Format utilities
 export { toEngineFileTree } from './format.js';
 
+// Font centralization
+export { parseFontManifest, collectUniqueHashes, isFontFile, FONT_MANIFEST_NAME } from './fonts.js';
+export type { FontManifest, FontStoreEntry, FontDehydrationSummary } from './fonts.js';
+
 // Sources (browser-safe; Node filesystem: `@quillmark/registry/node`)
 export { HttpSource } from './sources/http-source.js';
 export type { HttpSourceOptions } from './sources/http-source.js';

@@ -4,7 +4,9 @@ import { createHash } from 'node:crypto';
 import type { QuillBundle, QuillManifest, QuillMetadata, QuillSource } from '../types.js';
 import { RegistryError } from '../errors.js';
 import { toEngineFileTree } from '../format.js';
-import { packDirectory } from '../bundle.js';
+import { packDirectory, packFiles } from '../bundle.js';
+import { isFontFile, FONT_MANIFEST_NAME } from '../fonts.js';
+import type { FontManifest, FontDehydrationSummary } from '../fonts.js';
 
 /** Reads files from a directory recursively, returning a map of relative paths to contents. */
 async function readDirRecursive(
@@ -48,6 +50,11 @@ async function listFilesRecursive(
 	}
 
 	return paths;
+}
+
+/** Full lowercase MD5 hex digest. */
+function md5Full(data: Uint8Array): string {
+	return createHash('md5').update(data).digest('hex');
 }
 
 /** First 6 lowercase hex chars of MD5 (for cache-busted filenames). */
@@ -212,10 +219,17 @@ export class FileSystemSource implements QuillSource {
 
 	/**
 	 * Packages all quills for HTTP static hosting.
-	 * Clears `outputDir`, then writes content-addressed `.zip` bundles and
-	 * `manifest.{md5prefix6}.json` (hash of the manifest JSON body).
+	 * Clears `outputDir`, then writes content-addressed `.zip` bundles,
+	 * `manifest.{md5prefix6}.json`, and a `store/` directory containing
+	 * deduplicated font blobs keyed by MD5 hash.
+	 *
+	 * Font files (`*.ttf`, `*.otf`, `*.woff`, `*.woff2`) are stripped from
+	 * each ZIP and replaced by a `fonts.json` sidecar manifest that maps
+	 * original paths to content hashes.
 	 */
-	async packageForHttp(outputDir: string): Promise<{ manifestFileName: string }> {
+	async packageForHttp(
+		outputDir: string,
+	): Promise<{ manifestFileName: string; fonts: FontDehydrationSummary }> {
 		await fs.rm(outputDir, { recursive: true, force: true });
 		await fs.mkdir(outputDir, { recursive: true });
 
@@ -232,12 +246,69 @@ export class FileSystemSource implements QuillSource {
 			seenRefs.add(ref);
 		}
 
+		// Track font usage across all quills for dedup reporting.
+		const fontUsage = new Map<string, { fileName: string; quillCount: number; size: number }>();
+		let totalStrippedBytes = 0;
+		const writtenHashes = new Set<string>();
+		let storeCreated = false;
+
 		const packagedQuills: QuillMetadata[] = [];
 		for (const entry of manifest.quills) {
 			const quillDir = path.join(this.quillsDir, entry.name, entry.version);
-			const fileList = await listFilesRecursive(quillDir);
+			const allFiles = await readDirRecursive(quillDir);
 
-			const packed = await packDirectory(quillDir, fileList);
+			// Separate fonts from non-font files.
+			const packable: Record<string, Uint8Array> = {};
+			const fonts: Record<string, Uint8Array> = {};
+			for (const [filePath, bytes] of Object.entries(allFiles)) {
+				if (isFontFile(filePath)) {
+					fonts[filePath] = bytes;
+				} else {
+					packable[filePath] = bytes;
+				}
+			}
+
+			// Dehydrate: strip fonts, write to store, inject fonts.json.
+			if (Object.keys(fonts).length > 0) {
+				const manifestFiles: Record<string, string> = {};
+				const sortedPaths = Object.keys(fonts).sort();
+
+				for (const fontPath of sortedPaths) {
+					const bytes = fonts[fontPath];
+					const hash = md5Full(bytes);
+					manifestFiles[fontPath] = hash;
+					totalStrippedBytes += bytes.length;
+
+					// Track dedup signal.
+					const existing = fontUsage.get(hash);
+					if (existing) {
+						existing.quillCount++;
+					} else {
+						fontUsage.set(hash, {
+							fileName: path.basename(fontPath),
+							quillCount: 1,
+							size: bytes.length,
+						});
+					}
+
+					// Write to store (idempotent within this run).
+					if (!writtenHashes.has(hash)) {
+						if (!storeCreated) {
+							await fs.mkdir(path.join(outputDir, 'store'), { recursive: true });
+							storeCreated = true;
+						}
+						await fs.writeFile(path.join(outputDir, 'store', hash), bytes);
+						writtenHashes.add(hash);
+					}
+				}
+
+				const fontManifest: FontManifest = { version: 1, files: manifestFiles };
+				packable[FONT_MANIFEST_NAME] = new TextEncoder().encode(
+					JSON.stringify(fontManifest, null, 2),
+				);
+			}
+
+			const packed = await packFiles(packable);
 			const contentHash = md5Prefix6(packed);
 			const bundleFileName = `${entry.name}@${entry.version}.${contentHash}.zip`;
 			await fs.writeFile(path.join(outputDir, bundleFileName), packed);
@@ -252,7 +323,18 @@ export class FileSystemSource implements QuillSource {
 		const manifestFileName = `manifest.${md5Prefix6(manifestJson)}.json`;
 		await fs.writeFile(path.join(outputDir, manifestFileName), manifestJson);
 
-		return { manifestFileName };
+		const fonts: FontDehydrationSummary = {
+			uniqueCount: fontUsage.size,
+			totalStrippedBytes,
+			files: [...fontUsage.entries()].map(([hash, info]) => ({
+				fileName: info.fileName,
+				hash,
+				size: info.size,
+				quillCount: info.quillCount,
+			})),
+		};
+
+		return { manifestFileName, fonts };
 	}
 
 }

@@ -31,6 +31,15 @@ export interface QuillBundle {
 	 *  Currently: the nested file-tree structure expected by `registerQuill()`. */
 	data: QuillData;
 	metadata: QuillMetadata;
+	/**
+	 * Font bytes keyed by content hash (MD5 hex), present when the bundle
+	 * was loaded from a dehydrated ZIP containing `fonts.json`.
+	 *
+	 * Consumers with a `FontProvider`-aware WASM engine can pass this map
+	 * directly instead of relying on the transparent rehydration that
+	 * `HttpSource.loadQuill()` performs by default.
+	 */
+	fontMap?: Map<string, Uint8Array>;
 }
 
 /** Pluggable backend that knows how to list and fetch Quills from a specific location. */
