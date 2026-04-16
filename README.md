@@ -2,7 +2,12 @@
 
 **Under Development**
 
-Unified API for discovering, loading, and registering Quills with the Quillmark WASM engine. Works in both browser and Node.js environments.
+Unified API for discovering, loading, and registering Quills with the Quillmark WASM engine.
+
+**Runtime boundary**
+
+- **`@quillmark/registry`** — Browser-safe entry: no `node:*` imports. Use `HttpSource`, `QuillRegistry`, `validateQuills({ source, ... })`, etc.
+- **`@quillmark/registry/node`** — Node-only: `FileSystemSource`, `validateQuillsFromDir({ quillsDir, ... })`, and the same `validateQuills` re-export for convenience.
 
 ## Install
 
@@ -49,7 +54,8 @@ const result = engine.render(parsed, { quill: 'usaf_memo' });
 
 ```ts
 import { Quillmark } from '@quillmark/wasm';
-import { QuillRegistry, FileSystemSource } from '@quillmark/registry';
+import { QuillRegistry } from '@quillmark/registry';
+import { FileSystemSource } from '@quillmark/registry/node';
 
 const engine = new Quillmark();
 const source = new FileSystemSource('/path/to/quills');
@@ -112,10 +118,22 @@ Supported pointer payloads:
 
 ### `FileSystemSource`
 
-Node.js-only source that reads quill directories from disk. Each version directory must contain a `Quill.yaml` file; name and version are derived from the directory structure.
+Node.js-only source that reads quill directories from disk. Import from **`@quillmark/registry/node`**. Each version directory must contain a `Quill.yaml` file; name and version are derived from the directory structure.
 
 ```ts
+import { FileSystemSource } from '@quillmark/registry/node';
+
 const source = new FileSystemSource('/path/to/quills');
+```
+
+### `validateQuills` / `validateQuillsFromDir`
+
+- **`validateQuills`** (root) — takes a `QuillSource` (e.g. `HttpSource` in the browser).
+- **`validateQuillsFromDir`** (`@quillmark/registry/node`) — convenience for CI: validates all quills under a local directory via `FileSystemSource`.
+
+```ts
+import { validateQuills, HttpSource } from '@quillmark/registry';
+// or: import { validateQuillsFromDir } from '@quillmark/registry/node';
 ```
 
 #### Packaging for static hosting

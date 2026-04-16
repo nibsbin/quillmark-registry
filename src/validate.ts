@@ -1,6 +1,5 @@
-import { FileSystemSource } from './sources/file-system-source.js';
 import { QuillRegistry } from './registry.js';
-import type { QuillmarkEngine, QuillInfo } from './types.js';
+import type { QuillInfo, QuillmarkEngine, QuillSource } from './types.js';
 import { formatUnknownError } from './errors.js';
 
 /**
@@ -27,29 +26,31 @@ export interface QuillValidationEngine extends QuillmarkEngine {
 /**
  * Options for {@link validateQuills}.
  *
- * Example usage in a collection repo's test suite:
+ * Use any {@link QuillSource} (e.g. {@link HttpSource} in the browser). For
+ * filesystem-backed validation on Node, use {@link validateQuillsFromDir} from
+ * `@quillmark/registry/node`.
  *
  * ```ts
- * import { validateQuills } from '@quillmark/registry';
+ * import { validateQuills, HttpSource } from '@quillmark/registry';
  * import { Quillmark, init } from '@quillmark/wasm';
  *
  * init();
  * const wasm = new Quillmark();
+ * const source = new HttpSource({ baseUrl: 'https://example.com/quills' });
  * try {
- *   const { passed, failed, results } = await validateQuills({
- *     quillsDir: './quills',
+ *   const { passed, failed } = await validateQuills({
+ *     source,
  *     engine: wasm,
  *     parseMarkdown: Quillmark.parseMarkdown,
  *   });
- *   console.log(`${passed} passed, ${failed} failed`);
  * } finally {
  *   wasm.free();
  * }
  * ```
  */
 export interface ValidateQuillsOptions {
-	/** Path to the quills directory following the `name/version/` layout. */
-	quillsDir: string;
+	/** Quill listing and loading backend (HTTP, in-memory test double, etc.). */
+	source: QuillSource;
 
 	/**
 	 * Initialised WASM engine instance (e.g. `new Quillmark()` from `@quillmark/wasm`).
@@ -88,11 +89,10 @@ export interface ValidateQuillsResult {
 }
 
 /**
- * Validates every quill in a directory by registering it with the WASM engine
- * and rendering its example document.
+ * Validates every quill from a {@link QuillSource} by registering it with the WASM engine
+ * and rendering its example document when present.
  *
- * Designed for Quill collection repositories to run as a CI gate before release.
- * Each quill goes through two validation stages:
+ * Designed for CI gates and local checks. Each quill goes through two validation stages:
  *
  * 1. **Registration** — `registerQuill()` validates the quill's file structure,
  *    `Quill.yaml` schema, and Typst package layout.
@@ -105,8 +105,7 @@ export interface ValidateQuillsResult {
 export async function validateQuills(
 	options: ValidateQuillsOptions,
 ): Promise<ValidateQuillsResult> {
-	const { quillsDir, engine, parseMarkdown } = options;
-	const source = new FileSystemSource(quillsDir);
+	const { source, engine, parseMarkdown } = options;
 	const registry = new QuillRegistry({ source, engine });
 	const manifest = await source.getManifest();
 	const results: QuillValidationEntry[] = [];

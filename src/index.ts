@@ -17,8 +17,7 @@ export type { RegistryErrorCode } from './errors.js';
 // Format utilities
 export { toEngineFileTree } from './format.js';
 
-// Sources
-export { FileSystemSource } from './sources/file-system-source.js';
+// Sources (browser-safe; Node filesystem: `@quillmark/registry/node`)
 export { HttpSource } from './sources/http-source.js';
 export type { HttpSourceOptions } from './sources/http-source.js';
 export { resolveManifestFileName } from './bootstrap.js';

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { validateQuills } from '../validate.js';
+import { validateQuillsFromDir } from '../node.js';
 import type { QuillValidationEngine } from '../validate.js';
 import type { QuillInfo } from '../types.js';
 
@@ -48,7 +48,7 @@ describe('validateQuills error formatting', () => {
 		await fs.writeFile(path.join(quillVersionDir, 'Quill.yaml'), 'name: sample\nversion: 0.1.0\n');
 
 		try {
-			const result = await validateQuills({
+			const result = await validateQuillsFromDir({
 				quillsDir,
 				engine: new ThrowingRenderEngine(),
 				parseMarkdown: () => ({ fields: {}, quillName: 'sample' }),

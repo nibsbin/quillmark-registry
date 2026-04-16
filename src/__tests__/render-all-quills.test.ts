@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as path from 'node:path';
 import { Quillmark, init } from '@quillmark/wasm';
-import { validateQuills } from '../validate.js';
+import { validateQuillsFromDir } from '../node.js';
 
 /** Path to the minimal quill fixtures for integration tests. */
 const QUILLS_DIR = path.join(import.meta.dirname, 'fixtures/quills');
@@ -15,7 +15,7 @@ describe('validateQuills', () => {
 		const wasm = new Quillmark();
 
 		try {
-			const { passed, failed, results } = await validateQuills({
+			const { passed, failed, results } = await validateQuillsFromDir({
 				quillsDir: QUILLS_DIR,
 				engine: wasm,
 				parseMarkdown: Quillmark.parseMarkdown,
@@ -41,7 +41,7 @@ describe('validateQuills', () => {
 
 		try {
 			await expect(
-				validateQuills({
+				validateQuillsFromDir({
 					quillsDir: path.join(QUILLS_DIR, 'does-not-exist'),
 					engine: wasm,
 					parseMarkdown: Quillmark.parseMarkdown,
