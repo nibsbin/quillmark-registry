@@ -219,7 +219,7 @@ describe('HttpSource', () => {
 			const mockFetch = createMockFetch({
 				[MANIFEST_FILE]: { ok: true, body: MANIFEST },
 				'usaf_memo@1.0.0.aaaaaaaa.zip': { ok: true, body: zip },
-				`store/${hash}`: {
+				[`store/${hash}`]: {
 					ok: true,
 					body: fontBytes.buffer.slice(
 						fontBytes.byteOffset,
@@ -268,7 +268,7 @@ describe('HttpSource', () => {
 				[MANIFEST_FILE]: { ok: true, body: manifest },
 				'usaf_memo@1.0.0.aaaaaaaa.zip': { ok: true, body: usafZip.zip },
 				'classic_resume@2.1.0.bbbbbb.zip': { ok: true, body: resumeZip.zip },
-				`store/${usafZip.hash}`: {
+				[`store/${usafZip.hash}`]: {
 					ok: true,
 					body: fontBytes.buffer.slice(
 						fontBytes.byteOffset,
@@ -301,7 +301,7 @@ describe('HttpSource', () => {
 			const mockFetch = createMockFetch({
 				[MANIFEST_FILE]: { ok: true, body: MANIFEST },
 				'usaf_memo@1.0.0.aaaaaaaa.zip': { ok: true, body: zip },
-				`store/${hash}`: { ok: false, status: 404 },
+				[`store/${hash}`]: { ok: false, status: 404 },
 			});
 			const source = new HttpSource({
 				baseUrl: 'https://cdn.example.com/quills/',

@@ -245,6 +245,7 @@ export class FileSystemSource implements QuillSource {
 		const allFontBlobs = new Map<string, Uint8Array>();
 		const fontUsage = new Map<string, Set<string>>();
 		const fontNames = new Map<string, string>();
+		let strippedBytesTotal = 0;
 		for (const entry of manifest.quills) {
 			const quillDir = path.join(this.quillsDir, entry.name, entry.version);
 			const fileList = await listFilesRecursive(quillDir);
@@ -256,6 +257,7 @@ export class FileSystemSource implements QuillSource {
 				const bytes = new Uint8Array(await fs.readFile(fullPath));
 				if (isFontPath(filePath)) {
 					const hash = md5Hex(bytes);
+					strippedBytesTotal += bytes.length;
 					fontManifestFiles[filePath] = hash;
 					if (!allFontBlobs.has(hash)) {
 						allFontBlobs.set(hash, bytes);
@@ -303,10 +305,11 @@ export class FileSystemSource implements QuillSource {
 			for (const hash of sortedHashes) {
 				const fileName = fontNames.get(hash) ?? hash;
 				const usedBy = fontUsage.get(hash)!.size;
-				console.log(`  ${fileName.padEnd(20)} ${hash.slice(0, 6)}…  used by ${usedBy} quills`);
+				console.log(`  ${fileName.padEnd(20)} ${hash.slice(0, 6)}...  used by ${usedBy} quills`);
 			}
-			const strippedBytes = [...allFontBlobs.values()].reduce((acc, bytes) => acc + bytes.length, 0);
-			console.log(`\nbundle: stripped ${strippedBytes} bytes across ${manifest.quills.length} quills`);
+			console.log(
+				`\nbundles: stripped ${strippedBytesTotal} bytes across ${manifest.quills.length} quills`,
+			);
 		}
 
 		const packagedManifest: QuillManifest = { quills: packagedQuills };
