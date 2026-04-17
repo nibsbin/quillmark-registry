@@ -4,6 +4,7 @@
  */
 
 export { FileSystemSource } from './sources/file-system-source.js';
+export type { FontDehydrationSummary } from './sources/file-system-source.js';
 
 export {
 	validateQuills,

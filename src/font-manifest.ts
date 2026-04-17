@@ -34,6 +34,12 @@ export function validateFontManifest(
 	}
 
 	const maybeManifest = manifest as { version?: unknown; files?: unknown };
+
+	const unknownKeys = Object.keys(maybeManifest).filter((k) => k !== 'version' && k !== 'files');
+	if (unknownKeys.length > 0) {
+		throw new RegistryError(errorCode, `Invalid fonts.json: unexpected keys: ${unknownKeys.join(', ')}`);
+	}
+
 	if (maybeManifest.version !== FONT_MANIFEST_VERSION) {
 		throw new RegistryError(
 			errorCode,

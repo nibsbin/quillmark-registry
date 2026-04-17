@@ -1,13 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { createHash } from 'node:crypto';
 import {
 	isFontPath,
 	parseAndValidateFontManifest,
 	validateFontManifest,
 } from '../font-manifest.js';
-import { md5Hex } from '../md5-hex.js';
 import { RegistryError } from '../errors.js';
 
 const FIXTURES_DIR = path.join(
@@ -33,29 +31,6 @@ describe('isFontPath', () => {
 			expect(isFontPath(`file${ext}`)).toBe(false);
 		},
 	);
-});
-
-describe('md5Hex', () => {
-	it('returns a 32-character lowercase hex string', () => {
-		const result = md5Hex(new Uint8Array([1, 2, 3]));
-		expect(result).toMatch(/^[a-f0-9]{32}$/);
-	});
-
-	it('matches Node crypto output', () => {
-		const data = new Uint8Array([10, 20, 30, 40]);
-		const expected = createHash('md5').update(data).digest('hex');
-		expect(md5Hex(data)).toBe(expected);
-	});
-
-	it('produces identical hashes for identical bytes', () => {
-		const a = new Uint8Array([1, 2, 3]);
-		const b = new Uint8Array([1, 2, 3]);
-		expect(md5Hex(a)).toBe(md5Hex(b));
-	});
-
-	it('produces distinct hashes for distinct bytes', () => {
-		expect(md5Hex(new Uint8Array([1]))).not.toBe(md5Hex(new Uint8Array([2])));
-	});
 });
 
 describe('validateFontManifest', () => {
@@ -85,6 +60,12 @@ describe('validateFontManifest', () => {
 			},
 		});
 		expect(Object.keys(result.files)).toHaveLength(2);
+	});
+
+	it('rejects unknown top-level keys (additionalProperties: false)', () => {
+		expect(() =>
+			validateFontManifest({ version: 1, files: {}, extra: 'x' }),
+		).toThrow(RegistryError);
 	});
 
 	it('rejects null', () => {
