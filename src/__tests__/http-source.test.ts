@@ -291,6 +291,42 @@ describe('HttpSource', () => {
 			expect(fontFetchCalls).toHaveLength(1);
 		});
 
+		it('should not duplicate font fetches for concurrent quill loads sharing a hash', async () => {
+			const manifest: QuillManifest = {
+				quills: [
+					{ name: 'usaf_memo', version: '1.0.0', bundleFileName: 'usaf_memo@1.0.0.aaaaaaaa.zip' },
+					{ name: 'classic_resume', version: '2.1.0', bundleFileName: 'classic_resume@2.1.0.bbbbbb.zip' },
+				],
+			};
+			const fontBytes = new Uint8Array([33, 34, 35, 36]);
+			const usafZip = await createMockDehydratedBundle('1.0.0', 'assets/fonts/Inter-Regular.ttf', fontBytes);
+			const resumeZip = await createMockDehydratedBundle('2.1.0', 'assets/fonts/Inter-Regular.ttf', fontBytes);
+			const mockFetch = createMockFetch({
+				[MANIFEST_FILE]: { ok: true, body: manifest },
+				'usaf_memo@1.0.0.aaaaaaaa.zip': { ok: true, body: usafZip.zip },
+				'classic_resume@2.1.0.bbbbbb.zip': { ok: true, body: resumeZip.zip },
+				[`store/${usafZip.hash}`]: {
+					ok: true,
+					body: fontBytes.buffer.slice(fontBytes.byteOffset, fontBytes.byteOffset + fontBytes.byteLength),
+				},
+			});
+			const source = new HttpSource({
+				baseUrl: 'https://cdn.example.com/quills/',
+				manifestFileName: MANIFEST_FILE,
+				fetch: mockFetch,
+			});
+
+			await Promise.all([
+				source.loadQuill('usaf_memo', '1.0.0'),
+				source.loadQuill('classic_resume', '2.1.0'),
+			]);
+
+			const fontFetchCalls = mockFetch.mock.calls
+				.map((call) => call[0]?.toString() ?? '')
+				.filter((url) => url.includes(`/store/${usafZip.hash}`));
+			expect(fontFetchCalls).toHaveLength(1);
+		});
+
 		it('should fail load when a dehydrated font hash cannot be fetched', async () => {
 			const fontBytes = new Uint8Array([31, 32, 33, 34]);
 			const { zip, hash } = await createMockDehydratedBundle(

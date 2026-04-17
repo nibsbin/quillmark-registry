@@ -289,7 +289,11 @@ describe('FileSystemSource', () => {
 			await fs.writeFile(path.join(fontPath, 'Inter-Regular.ttf'), fontBytes);
 
 			const source = new FileSystemSource(TEST_DIR);
-			const { manifestFileName } = await source.packageForHttp(OUTPUT_DIR);
+			const { manifestFileName, summary } = await source.packageForHttp(OUTPUT_DIR);
+			expect(summary.strippedBytes).toBe(5);
+			expect(summary.fonts).toHaveLength(1);
+			expect(summary.fonts[0].fileName).toBe('Inter-Regular.ttf');
+			expect(summary.fonts[0].quillCount).toBe(1);
 			const manifestContent = JSON.parse(
 				await fs.readFile(path.join(OUTPUT_DIR, manifestFileName), 'utf-8'),
 			);
@@ -321,11 +325,13 @@ describe('FileSystemSource', () => {
 			await fs.writeFile(path.join(resumeFontDir, 'Inter-Regular.ttf'), sharedFontBytes);
 
 			const source = new FileSystemSource(TEST_DIR);
-			await source.packageForHttp(OUTPUT_DIR);
+			const { summary } = await source.packageForHttp(OUTPUT_DIR);
 
 			const storedFonts = await fs.readdir(path.join(OUTPUT_DIR, 'store'));
 			expect(storedFonts).toHaveLength(1);
 			expect(storedFonts[0]).toBe(md5Hex(sharedFontBytes));
+			expect(summary.fonts[0].quillCount).toBe(2);
+			expect(summary.strippedBytes).toBe(sharedFontBytes.length * 2);
 		});
 
 		it('should package multiple versions of the same quill', async () => {
