@@ -307,9 +307,12 @@ export class FileSystemSource implements QuillSource {
 				const usedBy = fontUsage.get(hash)!.size;
 				console.log(`  ${fileName.padEnd(20)} ${hash.slice(0, 6)}...  used by ${usedBy} quills`);
 			}
-			console.log(
-				`\nbundles: stripped ${strippedBytesTotal} bytes across ${manifest.quills.length} quills`,
-			);
+			const humanSize = strippedBytesTotal >= 1024 * 1024
+				? `${(strippedBytesTotal / 1024 / 1024).toFixed(1)} MB`
+				: strippedBytesTotal >= 1024
+					? `${(strippedBytesTotal / 1024).toFixed(1)} KB`
+					: `${strippedBytesTotal} B`;
+			console.log(`\nbundle: stripped ${humanSize} across ${manifest.quills.length} quills`);
 		}
 
 		const packagedManifest: QuillManifest = { quills: packagedQuills };
