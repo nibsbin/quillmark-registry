@@ -9,9 +9,9 @@ import {
 	FONT_MANIFEST_FILE_NAME,
 	FONT_MANIFEST_VERSION,
 	isFontPath,
-	md5Hex,
 	validateFontManifest,
 } from '../font-manifest.js';
+import { md5Hex } from '../md5-hex.js';
 
 /** Reads files from a directory recursively, returning a map of relative paths to contents. */
 async function readDirRecursive(

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { RegistryError } from './errors.js';
 
 export const FONT_MANIFEST_FILE_NAME = 'fonts.json';
@@ -14,10 +13,6 @@ export interface FontManifest {
 
 export function isFontPath(filePath: string): boolean {
 	return FONT_EXTENSION_RE.test(filePath);
-}
-
-export function md5Hex(data: Uint8Array): string {
-	return createHash('md5').update(data).digest('hex');
 }
 
 export function parseAndValidateFontManifest(raw: Uint8Array): FontManifest {

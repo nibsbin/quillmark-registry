@@ -4,10 +4,10 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import {
 	isFontPath,
-	md5Hex,
 	parseAndValidateFontManifest,
 	validateFontManifest,
 } from '../font-manifest.js';
+import { md5Hex } from '../md5-hex.js';
 import { RegistryError } from '../errors.js';
 
 const FIXTURES_DIR = path.join(
