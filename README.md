@@ -98,6 +98,8 @@ const source = new HttpSource({
 
 The manifest and each quill bundle use **content-hashed filenames** (6 hex chars, MD5 prefix) so you can serve them with long-lived CDN caches. Bundle URLs are `{baseUrl}{bundleFileName}` as given in the manifest (no query-string cache buster).
 
+When bundles contain `fonts.json`, `HttpSource` rehydrates stripped font files by fetching raw bytes from `{baseUrl}store/{md5}` and caching them in-memory per `HttpSource` instance.
+
 ### `resolveManifestFileName`
 
 Resolves the current hashed manifest filename using a stable bootstrap pointer file.
@@ -140,7 +142,11 @@ import { validateQuills, HttpSource } from '@quillmark/registry';
 
 ```ts
 const { manifestFileName } = await source.packageForHttp('/path/to/output');
-// Clears the output directory, then writes manifest.{hash6}.json and name@version.{hash6}.zip per quill.
+// Clears the output directory, then writes:
+// - manifest.{hash6}.json
+// - name@version.{hash6}.zip per quill
+// - store/{md5} for dehydrated font bytes
+// Each zip includes fonts.json at root and strips *.ttf/*.otf/*.woff/*.woff2 payloads.
 // Pass `manifestFileName` into HttpSource (or publish it alongside your static assets).
 ```
 

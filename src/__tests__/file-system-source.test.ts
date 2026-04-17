@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { FileSystemSource } from '../sources/file-system-source.js';
 import { RegistryError } from '../errors.js';
 import { unpackFiles } from '../bundle.js';
@@ -25,6 +26,10 @@ async function createQuillDir(name: string, version: string, description?: strin
 	const assetsDir = path.join(quillDir, 'assets');
 	await fs.mkdir(assetsDir, { recursive: true });
 	await fs.writeFile(path.join(assetsDir, 'logo.txt'), 'logo-placeholder');
+}
+
+function md5Hex(data: Uint8Array): string {
+	return createHash('md5').update(data).digest('hex');
 }
 
 describe('FileSystemSource', () => {
@@ -273,6 +278,54 @@ describe('FileSystemSource', () => {
 			expect(unpacked['Quill.yaml']).toBeDefined();
 			expect(unpacked['template.typ']).toBeDefined();
 			expect(unpacked['assets/logo.txt']).toBeDefined();
+			expect(unpacked['fonts.json']).toBeDefined();
+		});
+
+		it('should strip font files into /store and keep a fonts.json sidecar', async () => {
+			await createQuillDir('usaf_memo', '1.0.0');
+			const fontPath = path.join(TEST_DIR, 'usaf_memo', '1.0.0', 'assets', 'fonts');
+			await fs.mkdir(fontPath, { recursive: true });
+			const fontBytes = new Uint8Array([1, 2, 3, 4, 5]);
+			await fs.writeFile(path.join(fontPath, 'Inter-Regular.ttf'), fontBytes);
+
+			const source = new FileSystemSource(TEST_DIR);
+			const { manifestFileName } = await source.packageForHttp(OUTPUT_DIR);
+			const manifestContent = JSON.parse(
+				await fs.readFile(path.join(OUTPUT_DIR, manifestFileName), 'utf-8'),
+			);
+			const usaf = manifestContent.quills.find((q: { name: string }) => q.name === 'usaf_memo')!;
+			const zipData = await fs.readFile(path.join(OUTPUT_DIR, usaf.bundleFileName));
+			const unpacked = await unpackFiles(new Uint8Array(zipData));
+			expect(unpacked['assets/fonts/Inter-Regular.ttf']).toBeUndefined();
+			const fontManifest = JSON.parse(new TextDecoder().decode(unpacked['fonts.json']));
+			const hash = md5Hex(fontBytes);
+			expect(fontManifest).toEqual({
+				version: 1,
+				files: {
+					'assets/fonts/Inter-Regular.ttf': hash,
+				},
+			});
+			const stored = await fs.readFile(path.join(OUTPUT_DIR, 'store', hash));
+			expect(new Uint8Array(stored)).toEqual(fontBytes);
+		});
+
+		it('should deduplicate identical font bytes into a single store object', async () => {
+			await createQuillDir('usaf_memo', '1.0.0');
+			await createQuillDir('classic_resume', '2.1.0');
+			const sharedFontBytes = new Uint8Array([9, 8, 7, 6, 5, 4]);
+			const usafFontDir = path.join(TEST_DIR, 'usaf_memo', '1.0.0', 'assets', 'fonts');
+			const resumeFontDir = path.join(TEST_DIR, 'classic_resume', '2.1.0', 'assets', 'fonts');
+			await fs.mkdir(usafFontDir, { recursive: true });
+			await fs.mkdir(resumeFontDir, { recursive: true });
+			await fs.writeFile(path.join(usafFontDir, 'Inter-Regular.ttf'), sharedFontBytes);
+			await fs.writeFile(path.join(resumeFontDir, 'Inter-Regular.ttf'), sharedFontBytes);
+
+			const source = new FileSystemSource(TEST_DIR);
+			await source.packageForHttp(OUTPUT_DIR);
+
+			const storedFonts = await fs.readdir(path.join(OUTPUT_DIR, 'store'));
+			expect(storedFonts).toHaveLength(1);
+			expect(storedFonts[0]).toBe(md5Hex(sharedFontBytes));
 		});
 
 		it('should package multiple versions of the same quill', async () => {

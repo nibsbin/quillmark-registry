@@ -4,7 +4,14 @@ import { createHash } from 'node:crypto';
 import type { QuillBundle, QuillManifest, QuillMetadata, QuillSource } from '../types.js';
 import { RegistryError } from '../errors.js';
 import { toEngineFileTree } from '../format.js';
-import { packDirectory } from '../bundle.js';
+import { packFiles } from '../bundle.js';
+import {
+	FONT_MANIFEST_FILE_NAME,
+	FONT_MANIFEST_VERSION,
+	isFontPath,
+	md5Hex,
+	validateFontManifest,
+} from '../font-manifest.js';
 
 /** Reads files from a directory recursively, returning a map of relative paths to contents. */
 async function readDirRecursive(
@@ -218,6 +225,8 @@ export class FileSystemSource implements QuillSource {
 	async packageForHttp(outputDir: string): Promise<{ manifestFileName: string }> {
 		await fs.rm(outputDir, { recursive: true, force: true });
 		await fs.mkdir(outputDir, { recursive: true });
+		const storeDir = path.join(outputDir, 'store');
+		await fs.mkdir(storeDir, { recursive: true });
 
 		const manifest = await this.getManifest();
 		const seenRefs = new Set<string>();
@@ -233,11 +242,44 @@ export class FileSystemSource implements QuillSource {
 		}
 
 		const packagedQuills: QuillMetadata[] = [];
+		const allFontBlobs = new Map<string, Uint8Array>();
+		const fontUsage = new Map<string, Set<string>>();
+		const fontNames = new Map<string, string>();
 		for (const entry of manifest.quills) {
 			const quillDir = path.join(this.quillsDir, entry.name, entry.version);
 			const fileList = await listFilesRecursive(quillDir);
+			const zipFiles: Record<string, Uint8Array> = {};
+			const fontManifestFiles: Record<string, string> = {};
+			const quillRef = `${entry.name}@${entry.version}`;
+			for (const filePath of fileList.sort()) {
+				const fullPath = path.join(quillDir, filePath);
+				const bytes = new Uint8Array(await fs.readFile(fullPath));
+				if (isFontPath(filePath)) {
+					const hash = md5Hex(bytes);
+					fontManifestFiles[filePath] = hash;
+					if (!allFontBlobs.has(hash)) {
+						allFontBlobs.set(hash, bytes);
+					}
+					if (!fontUsage.has(hash)) {
+						fontUsage.set(hash, new Set());
+					}
+					fontUsage.get(hash)!.add(quillRef);
+					if (!fontNames.has(hash)) {
+						fontNames.set(hash, path.basename(filePath));
+					}
+					continue;
+				}
+				zipFiles[filePath] = bytes;
+			}
+			const fontManifest = validateFontManifest({
+				version: FONT_MANIFEST_VERSION,
+				files: fontManifestFiles,
+			});
+			zipFiles[FONT_MANIFEST_FILE_NAME] = new TextEncoder().encode(
+				JSON.stringify(fontManifest, null, 2),
+			);
 
-			const packed = await packDirectory(quillDir, fileList);
+			const packed = await packFiles(zipFiles);
 			const contentHash = md5Prefix6(packed);
 			const bundleFileName = `${entry.name}@${entry.version}.${contentHash}.zip`;
 			await fs.writeFile(path.join(outputDir, bundleFileName), packed);
@@ -245,6 +287,26 @@ export class FileSystemSource implements QuillSource {
 				...entry,
 				bundleFileName,
 			});
+		}
+		for (const [hash, bytes] of allFontBlobs) {
+			const storePath = path.join(storeDir, hash);
+			try {
+				await fs.access(storePath);
+			} catch {
+				await fs.writeFile(storePath, bytes);
+			}
+		}
+
+		if (fontUsage.size > 0) {
+			const sortedHashes = [...fontUsage.keys()].sort();
+			console.log('fonts:');
+			for (const hash of sortedHashes) {
+				const fileName = fontNames.get(hash) ?? hash;
+				const usedBy = fontUsage.get(hash)!.size;
+				console.log(`  ${fileName.padEnd(20)} ${hash.slice(0, 6)}…  used by ${usedBy} quills`);
+			}
+			const strippedBytes = [...allFontBlobs.values()].reduce((acc, bytes) => acc + bytes.length, 0);
+			console.log(`\nbundle: stripped ${strippedBytes} bytes across ${manifest.quills.length} quills`);
 		}
 
 		const packagedManifest: QuillManifest = { quills: packagedQuills };
