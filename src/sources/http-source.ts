@@ -2,6 +2,7 @@ import type { QuillBundle, QuillManifest, QuillSource } from '../types.js';
 import { RegistryError } from '../errors.js';
 import { toEngineFileTree } from '../format.js';
 import { unpackFiles } from '../bundle.js';
+import { FONT_MANIFEST_FILE_NAME, parseAndValidateFontManifest } from '../font-manifest.js';
 
 export interface HttpSourceOptions {
 	/** Base URL serving zips + manifest (e.g., "https://cdn.example.com/quills/"). */
@@ -29,6 +30,7 @@ export class HttpSource implements QuillSource {
 	private preloadedManifest?: QuillManifest;
 	private cachedManifest?: QuillManifest;
 	private fetchFn: typeof globalThis.fetch;
+	private fontCache: Map<string, Promise<Uint8Array>> = new Map();
 
 	constructor(options: HttpSourceOptions) {
 		// Ensure baseUrl ends with a slash for consistent URL construction
@@ -141,6 +143,7 @@ export class HttpSource implements QuillSource {
 				cause: err,
 			});
 		}
+		await this.rehydrateFonts(files);
 
 		return {
 			name: entry.name,
@@ -148,5 +151,45 @@ export class HttpSource implements QuillSource {
 			data: toEngineFileTree(files),
 			metadata: entry,
 		};
+	}
+
+	private fetchFont(hash: string): Promise<Uint8Array> {
+		const cached = this.fontCache.get(hash);
+		if (cached) return cached;
+		const storeUrl = `${this.baseUrl}store/${hash}`;
+		const promise = (async () => {
+			let response: Response;
+			try {
+				response = await this.fetchFn(storeUrl);
+			} catch (cause) {
+				throw new RegistryError('load_error', `Failed to fetch font bytes from ${storeUrl}`, { cause });
+			}
+			if (!response.ok) {
+				throw new RegistryError(
+					'load_error',
+					`Failed to fetch font bytes: ${response.status} ${response.statusText}`,
+				);
+			}
+			return new Uint8Array(await response.arrayBuffer());
+		})().catch((err) => {
+			this.fontCache.delete(hash);
+			throw err;
+		});
+		this.fontCache.set(hash, promise);
+		return promise;
+	}
+
+	private async rehydrateFonts(files: Record<string, Uint8Array>): Promise<void> {
+		const rawManifest = files[FONT_MANIFEST_FILE_NAME];
+		if (!rawManifest) return;
+
+		const manifest = parseAndValidateFontManifest(rawManifest);
+		const hashes = [...new Set(Object.values(manifest.files))];
+		await Promise.all(hashes.map((hash) => this.fetchFont(hash)));
+
+		for (const [filePath, hash] of Object.entries(manifest.files)) {
+			files[filePath] = await this.fontCache.get(hash)!;
+		}
+		delete files[FONT_MANIFEST_FILE_NAME];
 	}
 }

@@ -4,7 +4,13 @@ import { createHash } from 'node:crypto';
 import type { QuillBundle, QuillManifest, QuillMetadata, QuillSource } from '../types.js';
 import { RegistryError } from '../errors.js';
 import { toEngineFileTree } from '../format.js';
-import { packDirectory } from '../bundle.js';
+import { packFiles } from '../bundle.js';
+import {
+	FONT_MANIFEST_FILE_NAME,
+	FONT_MANIFEST_VERSION,
+	isFontPath,
+	validateFontManifest,
+} from '../font-manifest.js';
 
 /** Reads files from a directory recursively, returning a map of relative paths to contents. */
 async function readDirRecursive(
@@ -86,6 +92,19 @@ async function listSubdirectories(dirPath: string): Promise<string[]> {
 /** Returns true if the string is exactly a three-part semver version (digits and dots only). */
 function isSemver(value: string): boolean {
 	return /^\d+\.\d+\.\d+$/.test(value);
+}
+
+/** Per-font stats returned by {@link FileSystemSource.packageForHttp}. */
+export interface FontDehydrationSummary {
+	/** Total raw bytes stripped across all quills. */
+	strippedBytes: number;
+	/** One entry per unique font hash, sorted by hash. */
+	fonts: Array<{
+		fileName: string;
+		hash: string;
+		/** Number of quills that contained this font. */
+		quillCount: number;
+	}>;
 }
 
 /**
@@ -214,10 +233,15 @@ export class FileSystemSource implements QuillSource {
 	 * Packages all quills for HTTP static hosting.
 	 * Clears `outputDir`, then writes content-addressed `.zip` bundles and
 	 * `manifest.{md5prefix6}.json` (hash of the manifest JSON body).
+	 *
+	 * Returns `manifestFileName` and a `summary` of stripped font bytes.
+	 * Callers that want human-readable output can format `summary` themselves.
 	 */
-	async packageForHttp(outputDir: string): Promise<{ manifestFileName: string }> {
+	async packageForHttp(outputDir: string): Promise<{ manifestFileName: string; summary: FontDehydrationSummary }> {
 		await fs.rm(outputDir, { recursive: true, force: true });
 		await fs.mkdir(outputDir, { recursive: true });
+		const storeDir = path.join(outputDir, 'store');
+		await fs.mkdir(storeDir, { recursive: true });
 
 		const manifest = await this.getManifest();
 		const seenRefs = new Set<string>();
@@ -233,11 +257,46 @@ export class FileSystemSource implements QuillSource {
 		}
 
 		const packagedQuills: QuillMetadata[] = [];
+		const allFontBlobs = new Map<string, Uint8Array>();
+		const fontUsage = new Map<string, Set<string>>();
+		const fontNames = new Map<string, string>();
+		let strippedBytesTotal = 0;
 		for (const entry of manifest.quills) {
 			const quillDir = path.join(this.quillsDir, entry.name, entry.version);
 			const fileList = await listFilesRecursive(quillDir);
+			const zipFiles: Record<string, Uint8Array> = {};
+			const fontManifestFiles: Record<string, string> = {};
+			const quillRef = `${entry.name}@${entry.version}`;
+			for (const filePath of fileList.sort()) {
+				const fullPath = path.join(quillDir, filePath);
+				const bytes = new Uint8Array(await fs.readFile(fullPath));
+				if (isFontPath(filePath)) {
+					const hash = createHash('md5').update(bytes).digest('hex');
+					strippedBytesTotal += bytes.length;
+					fontManifestFiles[filePath] = hash;
+					if (!allFontBlobs.has(hash)) {
+						allFontBlobs.set(hash, bytes);
+					}
+					if (!fontUsage.has(hash)) {
+						fontUsage.set(hash, new Set());
+					}
+					fontUsage.get(hash)!.add(quillRef);
+					if (!fontNames.has(hash)) {
+						fontNames.set(hash, path.basename(filePath));
+					}
+					continue;
+				}
+				zipFiles[filePath] = bytes;
+			}
+			const fontManifest = validateFontManifest({
+				version: FONT_MANIFEST_VERSION,
+				files: fontManifestFiles,
+			});
+			zipFiles[FONT_MANIFEST_FILE_NAME] = new TextEncoder().encode(
+				JSON.stringify(fontManifest, null, 2),
+			);
 
-			const packed = await packDirectory(quillDir, fileList);
+			const packed = await packFiles(zipFiles);
 			const contentHash = md5Prefix6(packed);
 			const bundleFileName = `${entry.name}@${entry.version}.${contentHash}.zip`;
 			await fs.writeFile(path.join(outputDir, bundleFileName), packed);
@@ -246,13 +305,30 @@ export class FileSystemSource implements QuillSource {
 				bundleFileName,
 			});
 		}
+		for (const [hash, bytes] of allFontBlobs) {
+			const storePath = path.join(storeDir, hash);
+			try {
+				await fs.access(storePath);
+			} catch {
+				await fs.writeFile(storePath, bytes);
+			}
+		}
+
+		const summary: FontDehydrationSummary = {
+			strippedBytes: strippedBytesTotal,
+			fonts: [...fontUsage.keys()].sort().map((hash) => ({
+				fileName: fontNames.get(hash) ?? hash,
+				hash,
+				quillCount: fontUsage.get(hash)!.size,
+			})),
+		};
 
 		const packagedManifest: QuillManifest = { quills: packagedQuills };
 		const manifestJson = JSON.stringify(packagedManifest, null, 2);
 		const manifestFileName = `manifest.${md5Prefix6(manifestJson)}.json`;
 		await fs.writeFile(path.join(outputDir, manifestFileName), manifestJson);
 
-		return { manifestFileName };
+		return { manifestFileName, summary };
 	}
 
 }
