@@ -1,27 +1,6 @@
 import { QuillRegistry } from './registry.js';
-import type { QuillInfo, QuillmarkEngine, QuillSource } from './types.js';
+import type { QuillmarkEngine, QuillSource } from './types.js';
 import { formatUnknownError } from './errors.js';
-
-/**
- * Engine interface for quill validation.
- *
- * Extends the base {@link QuillmarkEngine} with `render()` so the validator
- * can compile each quill's example document end-to-end.
- *
- * Structurally compatible with `@quillmark/wasm`'s `Quillmark` class —
- * pass a `Quillmark` instance directly without adapters:
- *
- * ```ts
- * import { Quillmark } from '@quillmark/wasm';
- * const engine: QuillValidationEngine = new Quillmark();
- * ```
- */
-export interface QuillValidationEngine extends QuillmarkEngine {
-	render(
-		parsed: { fields: Record<string, unknown>; quillName: string },
-		opts: { format?: string },
-	): { artifacts: Array<{ bytes: Uint8Array }> };
-}
 
 /**
  * Options for {@link validateQuills}.
@@ -32,19 +11,19 @@ export interface QuillValidationEngine extends QuillmarkEngine {
  *
  * ```ts
  * import { validateQuills, HttpSource } from '@quillmark/registry';
- * import { Quillmark, init } from '@quillmark/wasm';
+ * import { Document, Quillmark, init } from '@quillmark/wasm';
  *
  * init();
- * const wasm = new Quillmark();
+ * const engine = new Quillmark();
  * const source = new HttpSource({ baseUrl: 'https://example.com/quills' });
  * try {
  *   const { passed, failed } = await validateQuills({
  *     source,
- *     engine: wasm,
- *     parseMarkdown: Quillmark.parseMarkdown,
+ *     engine,
+ *     parseDocument: Document.fromMarkdown,
  *   });
  * } finally {
- *   wasm.free();
+ *   engine.free();
  * }
  * ```
  */
@@ -54,24 +33,31 @@ export interface ValidateQuillsOptions {
 
 	/**
 	 * Initialised WASM engine instance (e.g. `new Quillmark()` from `@quillmark/wasm`).
-	 *
-	 * Must support `registerQuill`, `resolveQuill`, `listQuills`, and `render`.
+	 * Must support `quill(tree)`.
 	 */
-	engine: QuillValidationEngine;
+	engine: QuillmarkEngine;
 
 	/**
-	 * Static markdown parser (e.g. `Quillmark.parseMarkdown` from `@quillmark/wasm`).
+	 * Markdown-to-Document parser (inject `Document.fromMarkdown` from `@quillmark/wasm`).
+	 *
+	 * The registry avoids a direct `@quillmark/wasm` import so it can be consumed
+	 * in environments where the wasm module is loaded differently; callers wire
+	 * it in explicitly.
 	 */
-	parseMarkdown: (
-		markdown: string,
-	) => { fields: Record<string, unknown>; quillName: string };
+	parseDocument: (markdown: string) => unknown;
+
+	/**
+	 * Output format used to render each quill's example document.
+	 * Defaults to `"pdf"`.
+	 */
+	format?: string;
 }
 
 /** Validation result for a single quill version. */
 export interface QuillValidationEntry {
 	name: string;
 	version: string;
-	/** Whether `registerQuill()` succeeded (validates quill structure). */
+	/** Whether `engine.quill()` succeeded (validates quill structure). */
 	registered: boolean;
 	/** Whether the quill's example document rendered to non-empty artifacts. */
 	rendered: boolean;
@@ -88,24 +74,35 @@ export interface ValidateQuillsResult {
 	failed: number;
 }
 
+const EXAMPLE_FILE_RE = /^\s*example_file:\s*['"]?([^'"\s#]+)['"]?/m;
+const DEFAULT_EXAMPLE_FILE = 'example.md';
+
+/** Naively reads the `example_file` key out of Quill.yaml bytes, if present. */
+function readExampleFileName(yamlBytes: Uint8Array | undefined): string | null {
+	if (!yamlBytes) return null;
+	const text = new TextDecoder('utf-8', { fatal: false }).decode(yamlBytes);
+	const match = text.match(EXAMPLE_FILE_RE);
+	return match?.[1] ?? null;
+}
+
 /**
  * Validates every quill from a {@link QuillSource} by registering it with the WASM engine
  * and rendering its example document when present.
  *
  * Designed for CI gates and local checks. Each quill goes through two validation stages:
  *
- * 1. **Registration** — `registerQuill()` validates the quill's file structure,
- *    `Quill.yaml` schema, and Typst package layout.
- * 2. **Render** — if the quill includes an example document, it is parsed and
- *    rendered to the first supported output format (e.g. PDF), confirming that
- *    the Typst template compiles without error.
+ * 1. **Registration** — `engine.quill(tree)` validates the quill's file structure,
+ *    `Quill.yaml` schema, and backend package layout.
+ * 2. **Render** — if the quill's `Quill.yaml` declares `example_file` (or ships an
+ *    `example.md`), the file is parsed via `parseDocument` and rendered to the
+ *    requested `format` (default `"pdf"`), confirming end-to-end compilation.
  *
  * @returns Per-quill results and aggregate pass/fail counts.
  */
 export async function validateQuills(
 	options: ValidateQuillsOptions,
 ): Promise<ValidateQuillsResult> {
-	const { source, engine, parseMarkdown } = options;
+	const { source, engine, parseDocument, format = 'pdf' } = options;
 	const registry = new QuillRegistry({ source, engine });
 	const manifest = await source.getManifest();
 	const results: QuillValidationEntry[] = [];
@@ -119,21 +116,20 @@ export async function validateQuills(
 		};
 
 		try {
-			// Stage 1: load + register (validates quill structure)
 			const ref = `${quill.name}@${quill.version}`;
-			await registry.resolve(ref);
+			const bundle = await registry.resolve(ref);
 			entry.registered = true;
 
-			// Stage 2: render the example document
-			const info = engine.resolveQuill(quill.name) as QuillInfo | null;
-			if (info?.example && info.supportedFormats?.length > 0) {
-				// Replace the colon-style QUILL reference (e.g. "name:0.1") with
-				// the engine-compatible "@" format (e.g. "name@0.1.0")
-				const exampleMd = info.example.replace(/^QUILL:.*$/m, `QUILL: ${ref}`);
-				const parsed = parseMarkdown(exampleMd);
-				const result = engine.render(parsed, {
-					format: info.supportedFormats[0],
-				});
+			const exampleFileName =
+				readExampleFileName(bundle.data.get('Quill.yaml')) ?? DEFAULT_EXAMPLE_FILE;
+			const exampleBytes = bundle.data.get(exampleFileName);
+			if (!exampleBytes) {
+				// No example declared — registration alone is a pass.
+				entry.rendered = true;
+			} else {
+				const exampleMd = new TextDecoder().decode(exampleBytes);
+				const doc = parseDocument(exampleMd);
+				const result = bundle.quill!.render(doc, { format });
 
 				const firstArtifact = result.artifacts[0];
 				if (!firstArtifact || firstArtifact.bytes.length === 0) {

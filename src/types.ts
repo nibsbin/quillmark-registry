@@ -1,9 +1,9 @@
 /**
- * Opaque to the registry. Defined and validated by @quillmark/wasm.
- * Currently: the JSON structure returned by loaders.fromZip() or equivalent
- * filesystem read (template files, assets, fonts, Typst packages).
+ * Flat in-memory file tree: path → bytes.
+ * Accepted by `@quillmark/wasm`'s `Quillmark.quill(tree)` (requires a `Map`,
+ * not a plain object, per the wasm binding contract).
  */
-export type QuillData = unknown;
+export type QuillData = Map<string, Uint8Array>;
 
 /** Metadata about a quill, extracted from Quill.yaml or manifest. */
 export interface QuillMetadata {
@@ -26,11 +26,18 @@ export interface QuillManifest {
 export interface QuillBundle {
 	name: string;
 	version: string;
-	/** Opaque payload passed to engine.registerQuill().
-	 *  Shape is defined by @quillmark/wasm — the registry passes it through untouched.
-	 *  Currently: the nested file-tree structure expected by `registerQuill()`. */
+	/** Flat file tree (`Map<string, Uint8Array>`) passed verbatim to `Quillmark.quill()`. */
 	data: QuillData;
 	metadata: QuillMetadata;
+	/**
+	 * The engine-attached Quill handle. Populated by {@link QuillRegistry.resolve}
+	 * once the bundle has been passed through `engine.quill()`.
+	 *
+	 * Unset on bundles returned from {@link QuillRegistry.fetch} (which skips engine
+	 * attachment) and from {@link QuillSource.loadQuill} (which knows nothing about
+	 * any engine).
+	 */
+	quill?: QuillHandle;
 }
 
 /** Pluggable backend that knows how to list and fetch Quills from a specific location. */
@@ -40,29 +47,31 @@ export interface QuillSource {
 }
 
 /**
- * Info returned by the engine after registering or resolving a quill.
- * Matches the shape returned by `@quillmark/wasm`'s `Quillmark` class.
+ * Minimal structural type for the Quill handle returned by
+ * `Quillmark.quill(tree)` in `@quillmark/wasm`.
+ *
+ * The registry only reads `backendId` and invokes `render()`; callers with
+ * the full `@quillmark/wasm` types can cast to `Quill` for advanced usage
+ * (`open`, `projectForm`, etc.).
  */
-export interface QuillInfo {
-	name: string;
-	backend: string;
-	metadata: Record<string, unknown>;
-	example?: string;
-	schema: string;
-	defaults: Record<string, unknown>;
-	examples: Record<string, unknown[]>;
-	supportedFormats: string[];
+export interface QuillHandle {
+	readonly backendId: string;
+	render(doc: unknown, opts?: unknown): {
+		artifacts: Array<{ bytes: Uint8Array; format: string; mimeType: string }>;
+		warnings: unknown[];
+		outputFormat: string;
+		renderTimeMs: number;
+	};
+	free?(): void;
 }
 
 /**
- * Minimal interface for the @quillmark/wasm engine instance.
- * The registry only calls these methods — it never imports or instantiates the engine.
+ * Minimal structural type for the `@quillmark/wasm` engine instance.
+ * The registry only calls `quill(tree)` — it never imports or instantiates the engine.
  *
- * Structurally compatible with `@quillmark/wasm`'s `Quillmark` class so
- * you can pass a `Quillmark` instance directly without adapters.
+ * Structurally compatible with `@quillmark/wasm`'s `Quillmark` class so a
+ * `new Quillmark()` instance can be passed directly without adapters.
  */
 export interface QuillmarkEngine {
-	registerQuill(quill_json: unknown): QuillInfo;
-	resolveQuill(quill_ref: string): QuillInfo | null;
-	listQuills(): string[];
+	quill(tree: QuillData): QuillHandle;
 }

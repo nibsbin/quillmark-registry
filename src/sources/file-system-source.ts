@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { QuillBundle, QuillManifest, QuillMetadata, QuillSource } from '../types.js';
 import { RegistryError } from '../errors.js';
-import { toEngineFileTree } from '../format.js';
+import { toEngineTree } from '../format.js';
 import { packFiles } from '../bundle.js';
 import {
 	FONT_MANIFEST_FILE_NAME,
@@ -224,7 +224,7 @@ export class FileSystemSource implements QuillSource {
 		return {
 			name,
 			version,
-			data: toEngineFileTree(files),
+			data: toEngineTree(files),
 			metadata,
 		};
 	}

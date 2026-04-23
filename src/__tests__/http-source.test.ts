@@ -204,9 +204,9 @@ describe('HttpSource', () => {
 			expect(bundle.metadata.name).toBe('usaf_memo');
 			expect(bundle.metadata.description).toBe('USAF Memo');
 
-			const data = bundle.data as { files: Record<string, unknown> };
-			expect(data.files['Quill.yaml']).toBeDefined();
-			expect(data.files['template.typ']).toBeDefined();
+			expect(bundle.data).toBeInstanceOf(Map);
+			expect(bundle.data.get('Quill.yaml')).toBeInstanceOf(Uint8Array);
+			expect(bundle.data.get('template.typ')).toBeInstanceOf(Uint8Array);
 		});
 
 		it('should rehydrate fonts from /store and remove fonts.json before returning', async () => {
@@ -235,11 +235,11 @@ describe('HttpSource', () => {
 			});
 
 			const bundle = await source.loadQuill('usaf_memo', '1.0.0');
-			const data = bundle.data as { files: Record<string, unknown> };
-			expect(data.files['fonts.json']).toBeUndefined();
-			const assets = data.files['assets'] as Record<string, unknown>;
-			const fonts = assets['fonts'] as Record<string, unknown>;
-			expect(fonts['Inter-Regular.ttf']).toBeDefined();
+			expect(bundle.data).toBeInstanceOf(Map);
+			expect(bundle.data.has('fonts.json')).toBe(false);
+			const font = bundle.data.get('assets/fonts/Inter-Regular.ttf');
+			expect(font).toBeInstanceOf(Uint8Array);
+			expect(font).toEqual(fontBytes);
 		});
 
 		it('should cache font bytes across quill loads by md5 hash', async () => {

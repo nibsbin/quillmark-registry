@@ -1,26 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QuillRegistry } from '../registry.js';
 import { RegistryError } from '../errors.js';
-import type { QuillBundle, QuillManifest, QuillmarkEngine, QuillSource } from '../types.js';
-
-const MANIFEST: QuillManifest = {
-	quills: [
-		{ name: 'usaf_memo', version: '1.0.0', description: 'USAF Memo' },
-		{ name: 'classic_resume', version: '2.1.0' },
-	],
-};
+import type {
+	QuillBundle,
+	QuillData,
+	QuillHandle,
+	QuillManifest,
+	QuillmarkEngine,
+	QuillSource,
+} from '../types.js';
 
 function createMockBundle(name: string, version: string): QuillBundle {
+	const yaml = `Quill:\n  name: ${name}\n  version: ${version}\n  backend: typst\n  description: ${name} fixture\n  plate_file: plate.typ\n`;
+	const data: QuillData = new Map([
+		['Quill.yaml', new TextEncoder().encode(yaml)],
+		['plate.typ', new TextEncoder().encode(`// ${name}`)],
+	]);
 	return {
 		name,
 		version,
-		data: {
-			files: {
-				'Quill.yaml': {
-					contents: `Quill:\n  name: ${name}\n  version: ${version}\n  backend: typst\n  plate_file: plate.typ\n`,
-				},
-			},
-		},
+		data,
 		metadata: { name, version },
 	};
 }
@@ -49,104 +48,24 @@ function createMockSource(bundles: QuillBundle[]): QuillSource {
 	};
 }
 
-function createMockEngine(): QuillmarkEngine {
-	const registered = new Map<string, { name: string; version: string }>();
-
+function createMockHandle(): QuillHandle {
 	return {
-		registerQuill: vi.fn((data: unknown) => {
-			// Walk the tree to find Quill.yaml contents
-			const tree = data as { files?: Record<string, unknown> };
-			const yamlNode = tree?.files?.['Quill.yaml'] as { contents?: string } | undefined;
-			const yamlContent = yamlNode?.contents ?? '';
-			const nameMatch = yamlContent.match(/name:\s*(\S+)/);
-			const versionMatch = yamlContent.match(/version:\s*"?(\S+)"?/);
-			const name = nameMatch?.[1] ?? 'unknown';
-			const version = versionMatch?.[1] ?? '0.0.0';
-			registered.set(`${name}@${version}`, { name, version });
-			return {
-				name,
-				backend: 'typst',
-				metadata: { version },
-				schema: '',
-				defaults: {},
-				examples: {},
-				supportedFormats: ['pdf'],
-			};
-		}),
-		resolveQuill: vi.fn((ref: string) => {
-			// Check exact ref first, then name-only
-			if (registered.has(ref)) {
-				const info = registered.get(ref)!;
-				return {
-					name: info.name,
-					backend: 'typst',
-					metadata: { version: info.version },
-					schema: '',
-					defaults: {},
-					examples: {},
-					supportedFormats: ['pdf'],
-				};
-			}
-			// If ref doesn't contain @, search by name
-			if (!ref.includes('@')) {
-				for (const [, info] of registered.entries()) {
-					if (info.name === ref) {
-						return {
-							name: info.name,
-							backend: 'typst',
-							metadata: { version: info.version },
-							schema: '',
-							defaults: {},
-							examples: {},
-							supportedFormats: ['pdf'],
-						};
-					}
-				}
-			}
-			return null;
-		}),
-		listQuills: vi.fn(() => [...registered.keys()]),
-	} as unknown as QuillmarkEngine;
+		backendId: 'typst',
+		render: vi.fn(() => ({
+			artifacts: [
+				{ bytes: new Uint8Array([1, 2, 3]), format: 'pdf', mimeType: 'application/pdf' },
+			],
+			warnings: [],
+			outputFormat: 'pdf',
+			renderTimeMs: 1,
+		})),
+	};
 }
 
-function createMockEngineExactRefOnly(): QuillmarkEngine {
-	const registered = new Map<string, { name: string; version: string }>();
-
+function createMockEngine(): QuillmarkEngine {
 	return {
-		registerQuill: vi.fn((data: unknown) => {
-			const tree = data as { files?: Record<string, unknown> };
-			const yamlNode = tree?.files?.['Quill.yaml'] as { contents?: string } | undefined;
-			const yamlContent = yamlNode?.contents ?? '';
-			const nameMatch = yamlContent.match(/name:\s*(\S+)/);
-			const versionMatch = yamlContent.match(/version:\s*"?(\S+)"?/);
-			const name = nameMatch?.[1] ?? 'unknown';
-			const version = versionMatch?.[1] ?? '0.0.0';
-			registered.set(`${name}@${version}`, { name, version });
-			return {
-				name,
-				backend: 'typst',
-				metadata: { version },
-				schema: '',
-				defaults: {},
-				examples: {},
-				supportedFormats: ['pdf'],
-			};
-		}),
-		resolveQuill: vi.fn((ref: string) => {
-			const info = registered.get(ref);
-			if (!info) return null;
-			return {
-				name: info.name,
-				backend: 'typst',
-				metadata: { version: info.version },
-				schema: '',
-				defaults: {},
-				examples: {},
-				supportedFormats: ['pdf'],
-			};
-		}),
-		listQuills: vi.fn(() => [...registered.keys()]),
-	} as unknown as QuillmarkEngine;
+		quill: vi.fn(() => createMockHandle()),
+	};
 }
 
 describe('QuillRegistry', () => {
@@ -188,14 +107,16 @@ describe('QuillRegistry', () => {
 	});
 
 	describe('resolve()', () => {
-		it('should load quill from source and register with engine', async () => {
+		it('should load quill from source and attach to engine', async () => {
 			const registry = new QuillRegistry({ source, engine });
 			const bundle = await registry.resolve('usaf_memo');
 
 			expect(bundle.name).toBe('usaf_memo');
 			expect(bundle.version).toBe('1.0.0');
 			expect(source.loadQuill).toHaveBeenCalledWith('usaf_memo', '1.0.0');
-			expect(engine.registerQuill).toHaveBeenCalledWith(bundle.data);
+			expect(engine.quill).toHaveBeenCalledWith(bundle.data);
+			expect(bundle.quill).toBeDefined();
+			expect(bundle.quill!.backendId).toBe('typst');
 		});
 
 		it('should resolve with specific version', async () => {
@@ -235,19 +156,21 @@ describe('QuillRegistry', () => {
 			});
 		});
 
-		it('should check engine before hitting source', async () => {
+		it('should skip re-attaching already-attached quills', async () => {
 			const registry = new QuillRegistry({ source, engine });
 
-			// First resolve: hits source and registers
+			// First resolve: hits source and attaches handle
 			await registry.resolve('usaf_memo');
 			expect(source.loadQuill).toHaveBeenCalledTimes(1);
 			expect(source.getManifest).toHaveBeenCalledTimes(1);
+			expect(engine.quill).toHaveBeenCalledTimes(1);
 
 			// Second resolve: re-evaluates latest from startup-loaded manifest,
-			// reuses canonical fetch without reloading manifest.
+			// reuses canonical fetch without reloading manifest or re-attaching.
 			await registry.resolve('usaf_memo');
 			expect(source.loadQuill).toHaveBeenCalledTimes(1);
 			expect(source.getManifest).toHaveBeenCalledTimes(1);
+			expect(engine.quill).toHaveBeenCalledTimes(1);
 		});
 
 		it('should use registry cache for versioned lookups', async () => {
@@ -257,26 +180,23 @@ describe('QuillRegistry', () => {
 			await registry.resolve('usaf_memo@1.0.0');
 			expect(source.loadQuill).toHaveBeenCalledTimes(1);
 
-			// Reset the engine mock to not find it (test cache path specifically)
-			vi.mocked(engine.resolveQuill).mockReturnValue(null);
-
 			// Second resolve with same version: hits registry cache
 			await registry.resolve('usaf_memo@1.0.0');
 			expect(source.loadQuill).toHaveBeenCalledTimes(1);
+			expect(engine.quill).toHaveBeenCalledTimes(1);
 		});
 
 		it('should reuse cached versioned bundle for unversioned resolve after fetch', async () => {
-			const exactOnlyEngine = createMockEngineExactRefOnly();
-			const registry = new QuillRegistry({ source, engine: exactOnlyEngine });
+			const registry = new QuillRegistry({ source, engine });
 
 			await registry.fetch('usaf_memo@1.0.0');
 			expect(source.loadQuill).toHaveBeenCalledTimes(1);
-			expect(exactOnlyEngine.registerQuill).toHaveBeenCalledTimes(0);
+			expect(engine.quill).toHaveBeenCalledTimes(0);
 
 			const bundle = await registry.resolve('usaf_memo');
 			expect(bundle.version).toBe('1.0.0');
 			expect(source.loadQuill).toHaveBeenCalledTimes(1);
-			expect(exactOnlyEngine.registerQuill).toHaveBeenCalledTimes(1);
+			expect(engine.quill).toHaveBeenCalledTimes(1);
 		});
 
 		it('should pick highest cached version for unversioned resolve', async () => {
@@ -285,8 +205,7 @@ describe('QuillRegistry', () => {
 				createMockBundle('usaf_memo', '2.0.0'),
 			];
 			source = createMockSource(bundles);
-			const exactOnlyEngine = createMockEngineExactRefOnly();
-			const registry = new QuillRegistry({ source, engine: exactOnlyEngine });
+			const registry = new QuillRegistry({ source, engine });
 
 			await registry.resolve('usaf_memo@1.0.0');
 			await registry.resolve('usaf_memo@2.0.0');
@@ -295,7 +214,7 @@ describe('QuillRegistry', () => {
 			const bundle = await registry.resolve('usaf_memo');
 			expect(bundle.version).toBe('2.0.0');
 			expect(source.loadQuill).toHaveBeenCalledTimes(2);
-			expect(exactOnlyEngine.registerQuill).toHaveBeenCalledTimes(2);
+			expect(engine.quill).toHaveBeenCalledTimes(2);
 		});
 
 		it('should coalesce concurrent resolve() calls for the same ref', async () => {
@@ -312,7 +231,8 @@ describe('QuillRegistry', () => {
 			const [firstResolved, secondResolved] = await Promise.all([first, second]);
 			expect(firstResolved).toBe(secondResolved);
 			expect(firstResolved).toMatchObject({ name: 'usaf_memo', version: '1.0.0' });
-			expect(engine.registerQuill).toHaveBeenCalledTimes(1);
+			expect(firstResolved.quill).toBeDefined();
+			expect(engine.quill).toHaveBeenCalledTimes(1);
 		});
 
 		it('should resolve a prefetched bundle after engine is attached later', async () => {
@@ -324,7 +244,8 @@ describe('QuillRegistry', () => {
 			const bundle = await registry.resolve('usaf_memo@1.0.0');
 			expect(bundle.version).toBe('1.0.0');
 			expect(source.loadQuill).toHaveBeenCalledTimes(1);
-			expect(engine.registerQuill).toHaveBeenCalledTimes(1);
+			expect(engine.quill).toHaveBeenCalledTimes(1);
+			expect(bundle.quill).toBeDefined();
 		});
 
 		it('should fail fast when resolve is called without an engine', async () => {
@@ -361,14 +282,15 @@ describe('QuillRegistry', () => {
 	});
 
 	describe('fetch()', () => {
-		it('should fetch a canonical quill ref without registering', async () => {
+		it('should fetch a canonical quill ref without attaching', async () => {
 			const registry = new QuillRegistry({ source, engine });
 			const bundle = await registry.fetch('usaf_memo@1.0.0');
 
 			expect(bundle.name).toBe('usaf_memo');
 			expect(bundle.version).toBe('1.0.0');
 			expect(source.loadQuill).toHaveBeenCalledWith('usaf_memo', '1.0.0');
-			expect(engine.registerQuill).toHaveBeenCalledTimes(0);
+			expect(engine.quill).toHaveBeenCalledTimes(0);
+			expect(bundle.quill).toBeUndefined();
 		});
 
 		it('should reject non-canonical refs', async () => {
@@ -386,22 +308,28 @@ describe('QuillRegistry', () => {
 		});
 	});
 
-	describe('isLoaded()', () => {
+	describe('isLoaded() / getQuill() / listLoaded()', () => {
 		it('should return false for unloaded quill', () => {
 			const registry = new QuillRegistry({ source, engine });
 			expect(registry.isLoaded('usaf_memo')).toBe(false);
+			expect(registry.getQuill('usaf_memo@1.0.0')).toBeNull();
+			expect(registry.listLoaded()).toEqual([]);
 		});
 
 		it('should return true after resolve()', async () => {
 			const registry = new QuillRegistry({ source, engine });
 			await registry.resolve('usaf_memo');
 			expect(registry.isLoaded('usaf_memo')).toBe(true);
+			expect(registry.isLoaded('usaf_memo@1.0.0')).toBe(true);
+			expect(registry.getQuill('usaf_memo@1.0.0')).not.toBeNull();
+			expect(registry.listLoaded()).toEqual(['usaf_memo@1.0.0']);
 		});
 
 		it('should return false for different quill', async () => {
 			const registry = new QuillRegistry({ source, engine });
 			await registry.resolve('usaf_memo');
 			expect(registry.isLoaded('classic_resume')).toBe(false);
+			expect(registry.getQuill('classic_resume@2.1.0')).toBeNull();
 		});
 	});
 });

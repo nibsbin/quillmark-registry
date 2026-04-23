@@ -3,39 +3,20 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { validateQuillsFromDir } from '../node.js';
-import type { QuillValidationEngine } from '../validate.js';
-import type { QuillInfo } from '../types.js';
+import type { QuillHandle, QuillmarkEngine } from '../types.js';
 
-class ThrowingRenderEngine implements QuillValidationEngine {
-	private quillInfo: QuillInfo | null = null;
-
-	registerQuill(_: unknown): QuillInfo {
-		this.quillInfo = {
-			name: 'sample',
-			backend: 'typst',
-			metadata: { version: '0.1.0' },
-			example: '# Example\n\nQUILL: sample:0.1.0',
-			schema: '',
-			defaults: {},
-			examples: {},
-			supportedFormats: ['pdf'],
+/** Engine where the Quill handle throws a Map payload on render — mimics structured wasm error. */
+class ThrowingRenderEngine implements QuillmarkEngine {
+	quill(): QuillHandle {
+		return {
+			backendId: 'typst',
+			render(): never {
+				throw new Map([
+					['code', 'typst_error'],
+					['message', 'Unknown field "name"'],
+				]);
+			},
 		};
-		return this.quillInfo;
-	}
-
-	resolveQuill(_: string): QuillInfo | null {
-		return this.quillInfo;
-	}
-
-	listQuills(): string[] {
-		return this.quillInfo ? [this.quillInfo.name] : [];
-	}
-
-	render(): { artifacts: Array<{ bytes: Uint8Array }> } {
-		throw new Map([
-			['code', 'typst_error'],
-			['message', 'Unknown field "name"'],
-		]);
 	}
 }
 
@@ -45,13 +26,20 @@ describe('validateQuills error formatting', () => {
 		const quillsDir = path.join(tempRoot, 'quills');
 		const quillVersionDir = path.join(quillsDir, 'sample', '0.1.0');
 		await fs.mkdir(quillVersionDir, { recursive: true });
-		await fs.writeFile(path.join(quillVersionDir, 'Quill.yaml'), 'name: sample\nversion: 0.1.0\n');
+		await fs.writeFile(
+			path.join(quillVersionDir, 'Quill.yaml'),
+			'name: sample\nversion: 0.1.0\nexample_file: example.md\n',
+		);
+		await fs.writeFile(
+			path.join(quillVersionDir, 'example.md'),
+			'---\nQUILL: sample@0.1.0\n---\n\nbody\n',
+		);
 
 		try {
 			const result = await validateQuillsFromDir({
 				quillsDir,
 				engine: new ThrowingRenderEngine(),
-				parseMarkdown: () => ({ fields: {}, quillName: 'sample' }),
+				parseDocument: () => ({}),
 			});
 
 			expect(result.failed).toBe(1);

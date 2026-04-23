@@ -15,14 +15,14 @@ Unified API for discovering, loading, and registering Quills with the Quillmark 
 npm install @quillmark/registry
 ```
 
-**Peer dependency:** Requires `@quillmark/wasm@>=0.54.0` — you provide the engine instance.
+**Peer dependency:** Requires `@quillmark/wasm@>=0.58.2-rc.5` — you provide the engine instance.
 
 ## Quick Start
 
 ### Browser (HTTP source)
 
 ```ts
-import { Quillmark, init } from '@quillmark/wasm';
+import { Document, Quillmark, init } from '@quillmark/wasm';
 import { QuillRegistry, HttpSource, resolveManifestFileName } from '@quillmark/registry';
 
 // Resolve hashed manifest from a stable pointer file (defaults to manifest.json).
@@ -42,12 +42,12 @@ const engine = new Quillmark();
 registry.setEngine(engine);
 await fetched;
 
-// Resolve a quill — fetches, caches, and registers with the engine
-const bundle = await registry.resolve('usaf_memo'); // or await registry.resolve('usaf_memo@1.0.0')
+// Resolve a quill — fetches, caches, and attaches the Quill handle to the engine
+const bundle = await registry.resolve('usaf_memo'); // or 'usaf_memo@1.0.0'
 
-// Engine is now ready to render
-const parsed = Quillmark.parseMarkdown(myMarkdown);
-const result = engine.render(parsed, { quill: 'usaf_memo' });
+// Render via the attached Quill handle (new in @quillmark/wasm 0.58)
+const doc = Document.fromMarkdown(myMarkdown);
+const result = bundle.quill!.render(doc, { format: 'pdf' });
 ```
 
 ### Node.js (filesystem source)
@@ -68,7 +68,7 @@ const bundle = await registry.resolve('usaf_memo');
 
 ### `QuillRegistry`
 
-Orchestrates sources, resolves versions, caches loaded quills, and registers them with the engine. Loading is lazy — quills are fetched on first `resolve()` call, not at construction time.
+Orchestrates sources, resolves versions, caches loaded quills, and attaches them to the engine via `engine.quill()`. The new `@quillmark/wasm` engine no longer tracks quills itself — the registry owns the `name@version` → `Quill` handle map. Loading is lazy — quills are fetched on first `resolve()` call, not at construction time.
 
 ```ts
 const registry = new QuillRegistry({ source, engine });
@@ -76,12 +76,14 @@ const registry = new QuillRegistry({ source, engine });
 
 | Method | Description |
 |---|---|
-| `fetch(canonicalRef)` | Fetches a quill bundle by canonical ref (`name@version`, full semver) and caches it. Does not register with the engine. |
-| `resolve(ref)` | Resolves a quill reference (`name`, `name@version`, or semver selector like `name@1` / `name@1.2`). Reuses fetched bundles when present, otherwise fetches on demand, then registers with the engine. Returns a `QuillBundle`. |
+| `fetch(canonicalRef)` | Fetches a quill bundle by canonical ref (`name@version`, full semver) and caches it. Does not attach to the engine. |
+| `resolve(ref)` | Resolves a quill reference (`name`, `name@version`, or semver selector like `name@1` / `name@1.2`). Reuses fetched bundles when present, otherwise fetches on demand, then calls `engine.quill()` and stores the handle. Returns a `QuillBundle` with `.quill` populated. |
 | `setEngine(engine)` | Attaches or replaces the engine used by `resolve()`. Useful when fetching before `@quillmark/wasm` initialization completes. |
 | `getManifest()` | Returns the full `QuillManifest` from the source. |
 | `getAvailableQuills()` | Returns `QuillMetadata[]` for all quills in the source. |
-| `isLoaded(name)` | Returns `true` if the quill is registered in the engine. |
+| `getQuill(canonicalRef)` | Returns the attached `Quill` handle for a canonical ref, or `null`. |
+| `listLoaded()` | Returns canonical refs for every quill currently attached. |
+| `isLoaded(nameOrRef)` | Returns `true` if a quill with that name (or exact canonical ref) is attached. |
 
 ### `HttpSource`
 

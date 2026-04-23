@@ -36,7 +36,7 @@
   },
   "homepage": "https://github.com/nibsbin/quillmark-registry#readme",
   "devDependencies": {
-    "@quillmark/wasm": "^0.54.0",
+    "@quillmark/wasm": "^0.58.2-rc.5",
     "@types/node": "^25.3.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
@@ -56,7 +56,7 @@
     "dist"
   ],
   "peerDependencies": {
-    "@quillmark/wasm": ">=0.54.0"
+    "@quillmark/wasm": ">=0.58.2-rc.5"
   },
   "peerDependenciesMeta": {
     "@quillmark/wasm": {

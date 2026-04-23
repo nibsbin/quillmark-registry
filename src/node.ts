@@ -8,7 +8,6 @@ export type { FontDehydrationSummary } from './sources/file-system-source.js';
 
 export {
 	validateQuills,
-	type QuillValidationEngine,
 	type ValidateQuillsOptions,
 	type QuillValidationEntry,
 	type ValidateQuillsResult,

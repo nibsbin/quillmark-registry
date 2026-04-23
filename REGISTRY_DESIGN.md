@@ -1,5 +1,11 @@
 # @quillmark/registry
 
+> ⚠️ **OUTDATED below this line.** The registry was migrated to
+> `@quillmark/wasm@0.58.2-rc.5`, which removed `registerQuill`/`resolveQuill`/`listQuills`
+> in favor of `engine.quill(tree) → Quill`. The registry now owns the
+> `name@version → Quill handle` map itself. See `README.md` and `src/` for the
+> current contract; this file is kept only for historical context.
+
 **TL;DR:** New `@quillmark/registry` package replaces `@quillmark/web-utils` and the build-time packaging scripts. Provides a unified API for discovering, loading, packaging, and registering Quills with the WASM engine across browser and Node.js environments. The registry pushes resolved Quills to the engine via the existing `registerQuill()` API — the engine is unchanged.
 
 ## Dependencies

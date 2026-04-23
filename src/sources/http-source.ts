@@ -1,6 +1,6 @@
 import type { QuillBundle, QuillManifest, QuillSource } from '../types.js';
 import { RegistryError } from '../errors.js';
-import { toEngineFileTree } from '../format.js';
+import { toEngineTree } from '../format.js';
 import { unpackFiles } from '../bundle.js';
 import { FONT_MANIFEST_FILE_NAME, parseAndValidateFontManifest } from '../font-manifest.js';
 
@@ -148,7 +148,7 @@ export class HttpSource implements QuillSource {
 		return {
 			name: entry.name,
 			version: resolvedVersion,
-			data: toEngineFileTree(files),
+			data: toEngineTree(files),
 			metadata: entry,
 		};
 	}

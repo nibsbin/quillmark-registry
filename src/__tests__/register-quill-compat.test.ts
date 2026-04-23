@@ -5,7 +5,7 @@ import { Quillmark, init } from '@quillmark/wasm';
 import { QuillRegistry } from '../registry.js';
 import { FileSystemSource } from '../sources/file-system-source.js';
 import { HttpSource } from '../sources/http-source.js';
-import type { QuillManifest, QuillmarkEngine } from '../types.js';
+import type { QuillManifest } from '../types.js';
 
 /** Path to the minimal quill fixtures for integration tests. */
 const QUILLS_DIR = path.join(import.meta.dirname, 'fixtures/quills');
@@ -13,7 +13,7 @@ const QUILLS_DIR = path.join(import.meta.dirname, 'fixtures/quills');
 /** Temp directory for packageForHttp output. */
 const HTTP_OUTPUT_DIR = path.join(import.meta.dirname, '../../.test-fixtures-compat');
 
-describe('registerQuill compatibility with @quillmark/wasm', () => {
+describe('engine.quill() compatibility with @quillmark/wasm', () => {
 	let wasm: Quillmark;
 
 	beforeAll(() => {
@@ -25,39 +25,34 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 	});
 
 	describe('FileSystemSource → real Quillmark engine', () => {
-		it('should register minimal_quill from filesystem fixtures', async () => {
+		it('should attach minimal_quill from filesystem fixtures', async () => {
 			wasm = new Quillmark();
-			const engine = wasm as unknown as QuillmarkEngine;
 			const source = new FileSystemSource(QUILLS_DIR);
-			const registry = new QuillRegistry({ source, engine });
+			const registry = new QuillRegistry({ source, engine: wasm });
 
 			const bundle = await registry.resolve('minimal_quill');
 
 			expect(bundle.name).toBe('minimal_quill');
 			expect(bundle.version).toBe('0.1.0');
-
-			// Verify the real engine has it registered
-			const info = engine.resolveQuill('minimal_quill');
-			expect(info).not.toBeNull();
-			expect(info!.name).toBe('minimal_quill');
-			expect((info!.metadata as Record<string, unknown>).version).toBe('0.1.0');
-			expect(engine.listQuills()).toContain('minimal_quill@0.1.0');
+			expect(bundle.quill).toBeDefined();
+			expect(bundle.quill!.backendId).toBe('typst');
+			expect(registry.isLoaded('minimal_quill')).toBe(true);
+			expect(registry.listLoaded()).toContain('minimal_quill@0.1.0');
 
 			wasm.free();
 		});
 
-		it('should register all quills from the fixtures', async () => {
+		it('should attach all quills from the fixtures', async () => {
 			wasm = new Quillmark();
-			const engine = wasm as unknown as QuillmarkEngine;
 			const source = new FileSystemSource(QUILLS_DIR);
-			const registry = new QuillRegistry({ source, engine });
+			const registry = new QuillRegistry({ source, engine: wasm });
 			const manifest = await registry.getManifest();
 
 			for (const quill of manifest.quills) {
 				await registry.resolve(`${quill.name}@${quill.version}`);
 			}
 
-			const listed = engine.listQuills();
+			const listed = registry.listLoaded();
 			for (const quill of manifest.quills) {
 				expect(listed).toContain(`${quill.name}@${quill.version}`);
 			}
@@ -65,17 +60,16 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 			wasm.free();
 		});
 
-		it('should not re-register a quill already in the engine', async () => {
+		it('should not re-attach a quill already loaded by the registry', async () => {
 			wasm = new Quillmark();
-			const engine = wasm as unknown as QuillmarkEngine;
-			const spy = vi.spyOn(wasm, 'registerQuill');
+			const spy = vi.spyOn(wasm, 'quill');
 			const source = new FileSystemSource(QUILLS_DIR);
-			const registry = new QuillRegistry({ source, engine });
+			const registry = new QuillRegistry({ source, engine: wasm });
 
 			await registry.resolve('minimal_quill');
 			expect(spy).toHaveBeenCalledTimes(1);
 
-			// Second resolve: engine already has it, skips registration
+			// Second resolve: registry cache hit, skips engine.quill()
 			await registry.resolve('minimal_quill');
 			expect(spy).toHaveBeenCalledTimes(1);
 
@@ -85,9 +79,8 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 	});
 
 	describe('HttpSource → real Quillmark engine', () => {
-		it('should register minimal_quill loaded via HttpSource bundle', async () => {
+		it('should attach minimal_quill loaded via HttpSource bundle', async () => {
 			wasm = new Quillmark();
-			const engine = wasm as unknown as QuillmarkEngine;
 
 			// Package the fixtures for HTTP
 			const fsSource = new FileSystemSource(QUILLS_DIR);
@@ -121,23 +114,21 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 				manifestFileName,
 				fetch: mockFetch,
 			});
-			const registry = new QuillRegistry({ source: httpSource, engine });
+			const registry = new QuillRegistry({ source: httpSource, engine: wasm });
 
 			const bundle = await registry.resolve('minimal_quill');
 
 			expect(bundle.name).toBe('minimal_quill');
 			expect(bundle.version).toBe('0.1.0');
-			const info = engine.resolveQuill('minimal_quill');
-			expect(info).not.toBeNull();
-			expect(info!.name).toBe('minimal_quill');
-			expect(engine.listQuills()).toContain('minimal_quill@0.1.0');
+			expect(bundle.quill).toBeDefined();
+			expect(bundle.quill!.backendId).toBe('typst');
+			expect(registry.listLoaded()).toContain('minimal_quill@0.1.0');
 
 			wasm.free();
 		});
 
-		it('should register all quills via HttpSource bundles', async () => {
+		it('should attach all quills via HttpSource bundles', async () => {
 			wasm = new Quillmark();
-			const engine = wasm as unknown as QuillmarkEngine;
 
 			const fsSource = new FileSystemSource(QUILLS_DIR);
 			const { manifestFileName } = await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
@@ -171,13 +162,13 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 				manifestFileName,
 				fetch: mockFetch,
 			});
-			const registry = new QuillRegistry({ source: httpSource, engine });
+			const registry = new QuillRegistry({ source: httpSource, engine: wasm });
 
 			for (const quill of manifest.quills) {
 				await registry.resolve(`${quill.name}@${quill.version}`);
 			}
 
-			const listed = engine.listQuills();
+			const listed = registry.listLoaded();
 			for (const quill of manifest.quills) {
 				expect(listed).toContain(`${quill.name}@${quill.version}`);
 			}
@@ -187,7 +178,7 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 	});
 
 	describe('FileSystemSource → packageForHttp → HttpSource roundtrip', () => {
-		it('should produce identical registrations through the full roundtrip', async () => {
+		it('should produce identical attachments through the full roundtrip', async () => {
 			const fsSource = new FileSystemSource(QUILLS_DIR);
 			const { manifestFileName } = await fsSource.packageForHttp(HTTP_OUTPUT_DIR);
 
@@ -220,24 +211,17 @@ describe('registerQuill compatibility with @quillmark/wasm', () => {
 				fetch: mockFetch,
 			});
 
-			// Register minimal_quill from both sources with separate engines
 			const fsWasm = new Quillmark();
-			const fsEngine = fsWasm as unknown as QuillmarkEngine;
-			const fsRegistry = new QuillRegistry({ source: fsSource, engine: fsEngine });
+			const fsRegistry = new QuillRegistry({ source: fsSource, engine: fsWasm });
 			const fsBundle = await fsRegistry.resolve('minimal_quill');
 
 			const httpWasm = new Quillmark();
-			const httpEngine = httpWasm as unknown as QuillmarkEngine;
-			const httpRegistry = new QuillRegistry({ source: httpSource, engine: httpEngine });
+			const httpRegistry = new QuillRegistry({ source: httpSource, engine: httpWasm });
 			const httpBundle = await httpRegistry.resolve('minimal_quill');
 
-			// Both should register with the same identity
-			const fsInfo = fsEngine.resolveQuill('minimal_quill')!;
-			const httpInfo = httpEngine.resolveQuill('minimal_quill')!;
-			expect(fsInfo.name).toBe(httpInfo.name);
-			expect(fsInfo.metadata.version as string).toBe(httpInfo.metadata.version as string);
 			expect(fsBundle.name).toBe(httpBundle.name);
 			expect(fsBundle.version).toBe(httpBundle.version);
+			expect(fsBundle.quill!.backendId).toBe(httpBundle.quill!.backendId);
 
 			fsWasm.free();
 			httpWasm.free();

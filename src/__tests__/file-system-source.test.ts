@@ -131,17 +131,19 @@ describe('FileSystemSource', () => {
 			expect(bundle.version).toBe('0.1.0');
 		});
 
-		it('should include all quill files in data', async () => {
+		it('should include all quill files in data as a flat Map', async () => {
 			await createQuillDir('usaf_memo', '1.0.0', 'USAF Memo');
 
 			const source = new FileSystemSource(TEST_DIR);
 			const bundle = await source.loadQuill('usaf_memo', '1.0.0');
 
-			const data = bundle.data as { files: Record<string, unknown> };
-			expect(data.files['Quill.yaml']).toBeDefined();
-			expect(data.files['template.typ']).toBeDefined();
-			const assets = data.files['assets'] as Record<string, unknown>;
-			expect(assets['logo.txt']).toBeDefined();
+			expect(bundle.data).toBeInstanceOf(Map);
+			expect(bundle.data.get('Quill.yaml')).toBeInstanceOf(Uint8Array);
+			expect(bundle.data.get('template.typ')).toBeInstanceOf(Uint8Array);
+			expect(bundle.data.get('assets/logo.txt')).toBeInstanceOf(Uint8Array);
+			expect(new TextDecoder().decode(bundle.data.get('assets/logo.txt')!)).toBe(
+				'logo-placeholder',
+			);
 		});
 
 		it('should throw quill_not_found for unknown quill', async () => {

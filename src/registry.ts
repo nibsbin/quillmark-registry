@@ -1,5 +1,6 @@
 import type {
 	QuillBundle,
+	QuillHandle,
 	QuillManifest,
 	QuillmarkEngine,
 	QuillMetadata,
@@ -62,11 +63,14 @@ function isCanonicalRef(ref: string): boolean {
 
 /**
  * Orchestrates quill sources, resolves versions, caches loaded quills,
- * and registers them with the engine.
+ * and attaches them to the engine.
  *
  * The registry is scoped to a specific engine instance. On resolve(), it
- * fetches quill data from the source and registers it with that engine.
- * Loading is lazy — quills are fetched and pushed to the engine on first
+ * fetches quill data from the source and passes it through `engine.quill()`
+ * to obtain a Quill handle that the registry tracks internally (the new
+ * `@quillmark/wasm` engine does not track quills itself).
+ *
+ * Loading is lazy — quills are fetched and attached to the engine on first
  * resolve() call, not at construction time.
  */
 export class QuillRegistry {
@@ -83,8 +87,10 @@ export class QuillRegistry {
 	 * Keyed by quill ref (`name` or `name@version`).
 	 */
 	private resolving: Map<string, Promise<QuillBundle>> = new Map();
-	/** Coalesces registration to avoid duplicate registerQuill() races. */
-	private registering: Map<string, Promise<void>> = new Map();
+	/** Coalesces attachment to avoid duplicate engine.quill() races. */
+	private attaching: Map<string, Promise<QuillHandle>> = new Map();
+	/** Canonical-ref → attached Quill handle. */
+	private handles: Map<string, QuillHandle> = new Map();
 
 	constructor(options: QuillRegistryOptions) {
 		this.source = options.source;
@@ -112,8 +118,8 @@ export class QuillRegistry {
 	}
 
 	/**
-	 * Fetches a quill by canonical ref (`name@version`) without registering it.
-	 * Intended for loading in parallel before engine initialization.
+	 * Fetches a quill by canonical ref (`name@version`) without attaching it
+	 * to the engine. Intended for loading in parallel before engine initialization.
 	 */
 	async fetch(canonicalRef: string): Promise<QuillBundle> {
 		const [name, version, ...rest] = canonicalRef.split('@');
@@ -138,7 +144,10 @@ export class QuillRegistry {
 
 	/**
 	 * Resolves a quill by reference (e.g., `name@version` or `name`) and
-	 * ensures it is registered with the attached engine.
+	 * ensures it is attached to the engine via `engine.quill()`.
+	 *
+	 * The returned bundle has `.quill` set to the engine-attached Quill handle
+	 * (use `bundle.quill.render(doc, opts)` to render).
 	 *
 	 * For callers that need a canonical ref, derive it from the returned bundle:
 	 * `${bundle.name}@${bundle.version}`.
@@ -147,7 +156,7 @@ export class QuillRegistry {
 	 * 1. Check resolve cache — return if cached
 	 * 2. Fetch bundle (or reuse fetch cache)
 	 * 3. Ask source for the bundle (or throw version_not_found / quill_not_found)
-	 * 4. Register with engine via registerQuill() (coalesced by canonical ref)
+	 * 4. Call engine.quill() (coalesced by canonical ref) and attach the handle
 	 *
 	 * When no version is specified, resolves to latest available.
 	 */
@@ -166,10 +175,11 @@ export class QuillRegistry {
 
 		const resolvePromise = this.fetchForResolve(ref)
 			.then(async (bundle) => {
-				await this.ensureRegistered(bundle);
+				const handle = await this.ensureAttached(bundle);
+				const attached: QuillBundle = { ...bundle, quill: handle };
 				const resolvedKey = `${bundle.name}@${bundle.version}`;
-				this.resolving.set(resolvedKey, resolvePromise);
-				return bundle;
+				this.resolving.set(resolvedKey, Promise.resolve(attached));
+				return attached;
 			})
 			.finally(() => {
 				// Keep canonical refs cached, but do not pin selector/name refs.
@@ -183,11 +193,31 @@ export class QuillRegistry {
 	}
 
 	/**
-	 * Checks whether a quill is currently loaded in the engine.
-	 * Delegates to engine.resolveQuill().
+	 * Returns the engine-attached Quill handle for a canonical ref, or `null`
+	 * if no quill with that exact `name@version` has been resolved yet.
 	 */
-	isLoaded(name: string): boolean {
-		return this.engine?.resolveQuill(name) !== null;
+	getQuill(canonicalRef: string): QuillHandle | null {
+		return this.handles.get(canonicalRef) ?? null;
+	}
+
+	/** Returns canonical `name@version` refs for every quill attached so far. */
+	listLoaded(): string[] {
+		return [...this.handles.keys()];
+	}
+
+	/**
+	 * Checks whether a quill is currently attached to the engine.
+	 *
+	 * Matches against canonical `name@version` refs; passing just `name`
+	 * returns true if any version of that quill has been attached.
+	 */
+	isLoaded(nameOrRef: string): boolean {
+		if (this.handles.has(nameOrRef)) return true;
+		if (nameOrRef.includes('@')) return false;
+		for (const key of this.handles.keys()) {
+			if (key.startsWith(`${nameOrRef}@`)) return true;
+		}
+		return false;
 	}
 
 	private async fetchForResolve(ref: string): Promise<QuillBundle> {
@@ -254,32 +284,28 @@ export class QuillRegistry {
 		return this.fetch(`${name}@${latestVersion}`);
 	}
 
-	private async ensureRegistered(bundle: QuillBundle): Promise<void> {
+	private async ensureAttached(bundle: QuillBundle): Promise<QuillHandle> {
 		if (!this.engine) {
 			throw new Error('resolve() requires an attached engine. Provide one in constructor or call setEngine().');
 		}
 
 		const canonical = `${bundle.name}@${bundle.version}`;
-		const existing = this.registering.get(canonical);
-		if (existing) {
-			return existing;
-		}
+		const existing = this.handles.get(canonical);
+		if (existing) return existing;
 
-		const registerPromise = Promise.resolve()
+		const inFlight = this.attaching.get(canonical);
+		if (inFlight) return inFlight;
+
+		const attachPromise = Promise.resolve()
 			.then(() => {
-				const exactInfo = this.engine!.resolveQuill(canonical);
-				const byNameInfo = this.engine!.resolveQuill(bundle.name);
-				const info = exactInfo ?? byNameInfo;
-				const existingVersion = info?.metadata?.version;
-				if (typeof existingVersion === 'string' && existingVersion === bundle.version) {
-					return;
-				}
-				this.engine!.registerQuill(bundle.data);
+				const handle = this.engine!.quill(bundle.data);
+				this.handles.set(canonical, handle);
+				return handle;
 			})
 			.finally(() => {
-				this.registering.delete(canonical);
+				this.attaching.delete(canonical);
 			});
-		this.registering.set(canonical, registerPromise);
-		return registerPromise;
+		this.attaching.set(canonical, attachPromise);
+		return attachPromise;
 	}
 }

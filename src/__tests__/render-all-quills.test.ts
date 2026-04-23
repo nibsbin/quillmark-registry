@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as path from 'node:path';
-import { Quillmark, init } from '@quillmark/wasm';
+import { Document, Quillmark, init } from '@quillmark/wasm';
 import { validateQuillsFromDir } from '../node.js';
 
 /** Path to the minimal quill fixtures for integration tests. */
@@ -18,7 +18,7 @@ describe('validateQuills', () => {
 			const { passed, failed, results } = await validateQuillsFromDir({
 				quillsDir: QUILLS_DIR,
 				engine: wasm,
-				parseMarkdown: Quillmark.parseMarkdown,
+				parseDocument: Document.fromMarkdown,
 			});
 
 			expect(results.length).toBeGreaterThan(0);
@@ -44,7 +44,7 @@ describe('validateQuills', () => {
 				validateQuillsFromDir({
 					quillsDir: path.join(QUILLS_DIR, 'does-not-exist'),
 					engine: wasm,
-					parseMarkdown: Quillmark.parseMarkdown,
+					parseDocument: Document.fromMarkdown,
 				}),
 			).rejects.toThrow('Failed to read quills directory');
 		} finally {
@@ -52,4 +52,3 @@ describe('validateQuills', () => {
 		}
 	});
 });
-

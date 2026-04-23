@@ -5,7 +5,7 @@ export type {
 	QuillManifest,
 	QuillBundle,
 	QuillSource,
-	QuillInfo,
+	QuillHandle,
 	QuillmarkEngine,
 } from './types.js';
 
@@ -15,7 +15,7 @@ export { formatUnknownError } from './errors.js';
 export type { RegistryErrorCode } from './errors.js';
 
 // Format utilities
-export { toEngineFileTree } from './format.js';
+export { toEngineTree } from './format.js';
 
 // Sources (browser-safe; Node filesystem: `@quillmark/registry/node`)
 export { HttpSource } from './sources/http-source.js';
@@ -30,7 +30,6 @@ export type { QuillRegistryOptions } from './registry.js';
 // Validation
 export { validateQuills } from './validate.js';
 export type {
-	QuillValidationEngine,
 	ValidateQuillsOptions,
 	QuillValidationEntry,
 	ValidateQuillsResult,
